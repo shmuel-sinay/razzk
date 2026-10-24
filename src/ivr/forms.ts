@@ -73,8 +73,8 @@ function askField(ctx: Ctx, s: Sess, fld: Field): string | null {
     }
     case "text":
     case "city": {
-      const voiceTries = fld.voiceTries ?? 2;
-      return d.tries < voiceTries ? readVoice(s, p) : readKeyboard(s, [t("אנא הקלידו במקלדת. " + (fld.prompt || ""))]);
+      const voiceTries = fld.voiceTries ?? 0; // זיהוי דיבור עולה יחידות בימות — כברירת מחדל מקלידים
+      return d.tries < voiceTries ? readVoice(s, p) : readKeyboard(s, [t((fld.prompt || "").replace(/^אנא אמרו/, "אנא הקלידו") + " ובסיום הקישו סולמית.")]);
     }
     case "hours":
       return d.sub === "end"
@@ -141,7 +141,7 @@ async function parse(ctx: Ctx, s: Sess, fld: Field, raw: string): Promise<{ cand
       const list = await cities(ctx);
       const m = bestMatch(v, list);
       if (m) return { cand: { id: m.id, name: m.name }, readback: m.name };
-      if (d.tries >= (fld.voiceTries ?? 2)) {
+      if (d.tries >= (fld.voiceTries ?? 0)) {
         // אחרי הקלדה ידנית שלא נמצאה במאגר — נשמור כפי שהוקלד; המנהל יוכל לתקן
         const exact = list.find((c) => normalize(c.name) === normalize(v));
         return { cand: { id: exact?.id ?? null, name: v }, readback: v };
@@ -201,7 +201,7 @@ async function prefill(ctx: Ctx, s: Sess, fld: Field, pv: any): Promise<Res | nu
   if (typeof pv !== "string" || isEmpty(pv)) return null;
   const p = await parse(ctx, s, fld, pv);
   if (!p) return null;
-  const needConfirm = fld.confirm ?? ["text", "city", "days"].includes(fld.kind);
+  const needConfirm = fld.confirm ?? ["city", "days"].includes(fld.kind); // שם ואולם כבר אושרו בימות
   if (!needConfirm) return { done: p.cand };
   d.cand = p.cand; d.readback = p.readback; d.phase = "confirm";
   return { out: confirmOut(s, p.readback) };

@@ -42,8 +42,8 @@ await pro.start({
   NAME: "דוד כהן", AGE: "30", CITY: "ירושלים", STYLE: "1", DAYS: "123456",
   HSTART: "1800", HEND: "2300", PA: "1", MINPRICE: "800", PHONE: "0501111111", EMAILOK: "1", TZ: "1",
 });
-check(/דוד כהן/.test(pro.last) && /אישור/.test(pro.last), "השרת מבקש לאשר את השם שזוהה");
-await pro.answers("1", "1", "x", "1", "1", "x", "1", "1", "1"); // שם, עיר, הקלטת שכונה, סגנון, ימים, הקלטת פרטים, שעות, טלפונים, התחייבות
+check(/ירושלים/.test(pro.last) && /אישור/.test(pro.last), "השרת מבקש לאשר את העיר שזוהתה");
+await pro.answers("1", "x", "1", "1", "x", "1", "1", "1"); // עיר, הקלטת שכונה, סגנון, ימים, הקלטת פרטים, שעות, טלפונים, התחייבות
 check(toRoot(pro), "חזרה לתפריט הראשי בקו");
 const p0 = db.t.professionals?.[0] || {};
 check(db.t.professionals?.length === 1, "בעל המקצוע נשמר");
@@ -62,7 +62,7 @@ await cl.start({
   NAME: "משה לוי", CITY: "ירושלים", BUILDING: "12", HALL: "אולם הנרות", STYLE: "1",
   DATE: "010130", START: "2000", END: "2300", PA: "1", MAXORG: "1000", OVER: "2", PHONE: "0522222222", TZ: "2",
 });
-await cl.answers("1", "1", "x", "x", "1", "1", "1", "1"); // שם, עיר, שכונה, רחוב, אולם, סגנון, טלפונים, התחייבות
+await cl.answers("1", "x", "x", "1", "1", "1"); // עיר, שכונה, רחוב, סגנון, טלפונים, התחייבות
 check(db.t.requests?.length === 1, "הבקשה נשמרה");
 check(/נמצאו 1 בעלי מקצוע/.test(cl.last.replace(/&go_to_folder.*/, "")), "נמצא בעל מקצוע מתאים אחד");
 check(toRoot(cl), "חזרה לתפריט הראשי בקו");
@@ -88,7 +88,7 @@ check((db.t.offers || [])[0].fee_client === 90, "עמלה חושבה (10% על �
 console.log("בקשה מעיר אחרת לא מתאימה");
 const cl3 = new Call("0533333333", "/1/1/1");
 await cl3.start({ flow: "client_register", need: "organist", NAME: "דני", CITY: "בני ברק", BUILDING: "5", HALL: "אולם", STYLE: "1", DATE: "010130", START: "2000", END: "2300", PA: "1", MAXORG: "1000", OVER: "2", PHONE: "0533333333", TZ: "2" });
-await cl3.answers("1", "1", "x", "x", "1", "1", "1", "1");
+await cl3.answers("1", "x", "x", "1", "1", "1");
 check(/כרגע לא נמצאו/.test(cl3.last), "אין התאמה לעיר אחרת");
 
 console.log("תשלום ושותפים");

@@ -27,7 +27,7 @@ function proFields(ctx: Ctx): Field[] {
   return [
     { key: "name", kind: "text", prompt: "אנא אמרו את שמכם ואת שם משפחתכם." },
     { key: "age", kind: "number", prompt: "הקישו את גילכם ובסיומו סולמית.", min: 1, max: 2, validate: (n) => n >= 14 && n <= 99 },
-    { key: "city", kind: "city", voiceTries: 3, prompt: "אנא אמרו את שם העיר או הישוב בו תרצו לתת שירות." },
+    { key: "city", kind: "city", prompt: "אנא אמרו את שם העיר או הישוב בו תרצו לתת שירות." },
     { key: "neighborhood_audio", kind: "record", prompt: "אנא אמרו את שם השכונה ובסיום הקישו סולמית.", recSec: 10, recPrefix: "neigh" },
     {
       key: "style", kind: "choice", confirm: true,
@@ -56,11 +56,11 @@ function proFields(ctx: Ctx): Field[] {
 function clientFields(ctx: Ctx, need: string): Field[] {
   return [
     { key: "name", kind: "text", prompt: "אנא אמרו את שמכם ואת שם משפחתכם." },
-    { key: "city", kind: "city", voiceTries: 3, prompt: "אנא אמרו את שם העיר או הישוב בו יתקיים האירוע." },
+    { key: "city", kind: "city", prompt: "אנא אמרו את שם העיר או הישוב בו יתקיים האירוע." },
     { key: "neighborhood_audio", kind: "record", prompt: "אנא אמרו את שם השכונה ובסיום הקישו סולמית.", recSec: 10, recPrefix: "neigh" },
     { key: "street_audio", kind: "record", prompt: "אנא אמרו את שם הרחוב ובסיום הקישו סולמית.", recSec: 10, recPrefix: "street" },
     { key: "building", kind: "number", prompt: "הקישו את מספר הבניין בו נמצא האולם ובסיומו סולמית.", min: 1, max: 4 },
-    { key: "hall_name", kind: "text", voiceTries: 3, prompt: "אנא אמרו את שם האולם." },
+    { key: "hall_name", kind: "text", prompt: "אנא אמרו את שם האולם." },
     {
       key: "style", kind: "choice", confirm: true,
       prompt: "לסגנון נגינה חסידי הקישו 1. למזרחי הקישו 2. לשני הסגנונות הקישו 3.",
