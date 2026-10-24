@@ -81,7 +81,7 @@ function askField(ctx: Ctx, s: Sess, fld: Field): string | null {
         ? readDigits(s, [t("הקישו שעת סיום הזמינות בארבע ספרות, למשל אחת בלילה היא אפס אחת אפס אפס.")], { min: 4, max: 4, wait: 10 })
         : d.sub === "menu"
         ? readDigits(s, [t(`הזמינות שנקלטה היא ${hoursReadback(d.tmp)}. לאישור הקישו 1. לתיקון הקישו 2. להוספת שעות נוספות הקישו 3.`)], { min: 1, max: 1, allowed: "123" })
-        : readDigits(s, [t((d.tmp?.length ? "הקישו שעת התחלה נוספת" : fld.prompt || "הקישו שעת התחלת הזמינות") + " בארבע ספרות, למשל שמונה בערב היא אחת תשע אפס אפס.")], { min: 4, max: 4, wait: 10 });
+        : readDigits(s, [t((d.tmp?.length ? "הקישו שעת התחלה נוספת" : fld.prompt || "הקישו שעת התחלת הזמינות") + " בארבע ספרות, לדוגמה, שמונה בערב היא שתיים אפס אפס אפס.")], { min: 4, max: 4, wait: 10 });
     case "phones":
       return d.sub === "menu"
         ? readDigits(s, [t(`המספרים שנקלטו הם ${d.tmp.map(spell).join(" , ")}. לאישור הקישו 1. לתיקון הקישו 2. להוספת מספר נוסף הקישו 3.`)], { min: 1, max: 1, allowed: "123" })
