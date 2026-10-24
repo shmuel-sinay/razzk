@@ -92,31 +92,77 @@ admin.post("/settings", async (c) => {
   return c.redirect("/admin/settings");
 });
 
+const search = (rows: Row[], q: string) =>
+  q ? rows.filter((r) => JSON.stringify(Object.values(r)).includes(q)) : rows;
+const searchBox = (path: string, q: string) =>
+  `<form method="get" action="/admin/${path}" style="margin-bottom:10px"><input type="text" name="q" value="${esc(q)}" placeholder="חיפוש לפי שם, טלפון או עיר" style="max-width:320px"> <button>חיפוש</button></form>`;
+const toggleBtn = (tbl: string, id: string, field: string, to: boolean, label: string) =>
+  `<form method="post" action="/admin/toggle"><input type="hidden" name="table" value="${tbl}"><input type="hidden" name="id" value="${id}"><input type="hidden" name="field" value="${field}"><input type="hidden" name="to" value="${to}"><button>${label}</button></form>`;
+
 admin.get("/pros", async (c) => {
-  const rows = await db(c).list("professionals", { order: "created_at.desc", limit: 500 });
-  return c.html(page("בעלי מקצוע", table(
+  const q = c.req.query("q") || "";
+  const rows = search(await db(c).list("professionals", { order: "created_at.desc", limit: 1000 }), q);
+  return c.html(page("בעלי מקצוע", searchBox("pros", q) + table(
     [["name", "שם"], ["phone", "טלפון"], ["role", "תפקיד"], ["city_name", "עיר"], ["style", "סגנון"], ["days", "ימים"], ["hours", "שעות"], ["min_price", "מינימום"], ["active", "פעיל"]],
-    rows, (r) => `<form method="post" action="/admin/toggle"><input type="hidden" name="table" value="professionals"><input type="hidden" name="id" value="${r.id}"><input type="hidden" name="to" value="${!r.active}"><button>${r.active ? "השבתה" : "הפעלה"}</button></form>${delBtn("professionals", r.id)}`,
+    rows, (r) => `<a href="/admin/pros/${r.id}"><button>עריכה</button></a>` + toggleBtn("professionals", r.id, "active", !r.active, r.active ? "השבתה" : "הפעלה") + delBtn("professionals", r.id),
   )));
 });
 
-admin.get("/clients", async (c) =>
-  c.html(page("לקוחות", table([["name", "שם"], ["phone", "טלפון"], ["created_at", "נרשם"]], await db(c).list("clients", { order: "created_at.desc", limit: 500 }), (r) => delBtn("clients", r.id)))));
+admin.get("/pros/:id", async (c) => {
+  const r = await db(c).get("professionals", { id: c.req.param("id") });
+  if (!r) return c.text("לא נמצא", 404);
+  const f = (k: string, label: string, v: any) => `<p><label><b>${label}</b><br><input type="text" name="${k}" value="${esc(v)}"></label></p>`;
+  return c.html(page("עריכת בעל מקצוע", `<form method="post" class="card">
+${f("name", "שם", r.name)}${f("age", "גיל", r.age)}${f("city_name", "עיר", r.city_name)}${f("min_price", "סכום מינימלי", r.min_price)}
+${f("contact_phones", "טלפונים לקבלת הזמנות (מופרדים בפסיק)", (r.contact_phones || []).join(","))}
+<p><label><b>סגנון</b><br><select name="style">${["hasidic:חסידי", "mizrahi:מזרחי", "both:שניהם"].map((o) => { const [v, l] = o.split(":"); return `<option value="${v}"${r.style === v ? " selected" : ""}>${l}</option>`; }).join("")}</select></label></p>
+<p><label><input type="checkbox" name="has_pa" value="1"${r.has_pa ? " checked" : ""}> יש הגברה</label> &nbsp; <label><input type="checkbox" name="active" value="1"${r.active ? " checked" : ""}> פעיל</label></p>
+<p><small>טלפון הרישום: ${esc(r.phone)} · תפקיד: ${esc(r.role)} · ימים: ${esc(JSON.stringify(r.days))} · שעות: ${esc(JSON.stringify(r.hours))}</small></p>
+<button>שמירה</button></form>`));
+});
 
-admin.get("/requests", async (c) =>
-  c.html(page("בקשות", table(
+admin.post("/pros/:id", async (c) => {
+  const f = await c.req.parseBody();
+  await db(c).update("professionals", { id: c.req.param("id") }, {
+    name: String(f.name || ""), age: Number(f.age) || null, city_name: String(f.city_name || ""),
+    min_price: Number(f.min_price) || 0, style: String(f.style),
+    contact_phones: String(f.contact_phones || "").split(",").map((x) => x.trim()).filter(Boolean),
+    has_pa: f.has_pa === "1", active: f.active === "1",
+  });
+  return c.redirect("/admin/pros");
+});
+
+admin.get("/clients", async (c) => {
+  const q = c.req.query("q") || "";
+  const rows = search(await db(c).list("clients", { order: "created_at.desc", limit: 1000 }), q);
+  return c.html(page("לקוחות", searchBox("clients", q) + table([["name", "שם"], ["phone", "טלפון"], ["created_at", "נרשם"]], rows, (r) => delBtn("clients", r.id))));
+});
+
+admin.get("/requests", async (c) => {
+  const q = c.req.query("q") || "";
+  const rows = search(await db(c).list("requests", { order: "created_at.desc", limit: 1000 }), q);
+  return c.html(page("בקשות", searchBox("requests", q) + table(
     [["client_name", "לקוח"], ["client_phone", "טלפון"], ["need", "מבוקש"], ["city_name", "עיר"], ["hall_name", "אולם"], ["event_date", "תאריך"], ["start_time", "מ"], ["end_time", "עד"], ["max_organist", "תקציב אורגניסט"], ["max_singer", "תקציב זמר"], ["status", "סטטוס"]],
-    await db(c).list("requests", { order: "created_at.desc", limit: 500 }), (r) => delBtn("requests", r.id)))));
+    rows, (r) => toggleBtn("requests", r.id, "status", r.status !== "open", r.status === "open" ? "סגירה" : "פתיחה מחדש") + delBtn("requests", r.id))));
+});
 
-admin.get("/offers", async (c) =>
-  c.html(page("הצעות", table(
-    [["request_id", "בקשה"], ["pro_id", "בעל מקצוע"], ["amount", "סכום"], ["status", "סטטוס"], ["fee_client", "עמלת לקוח"], ["fee_pro", "עמלת בעל מקצוע"], ["created_at", "נשלחה"]],
-    await db(c).list("offers", { order: "created_at.desc", limit: 500 }), (r) => delBtn("offers", r.id)))));
+admin.get("/offers", async (c) => {
+  const d = db(c);
+  const [offers, pros, reqs] = await Promise.all([
+    d.list("offers", { order: "created_at.desc", limit: 500 }), d.list("professionals", { limit: 5000 }), d.list("requests", { limit: 5000 }),
+  ]);
+  const pn = new Map(pros.map((p: Row) => [p.id, p.name || p.phone]));
+  const rq = new Map(reqs.map((r: Row) => [r.id, `${r.client_name || r.client_phone} · ${r.city_name} · ${r.event_date}`]));
+  const rows = offers.map((o: Row) => ({ ...o, pro: pn.get(o.pro_id) || o.pro_id, req: rq.get(o.request_id) || o.request_id }));
+  return c.html(page("הצעות", table(
+    [["req", "בקשה"], ["pro", "בעל מקצוע"], ["amount", "סכום"], ["status", "סטטוס"], ["fee_client", "עמלת לקוח"], ["fee_pro", "עמלת בעל מקצוע"], ["created_at", "נשלחה"]],
+    rows, (r) => delBtn("offers", r.id))));
+});
 
 admin.get("/messages", async (c) =>
   c.html(page("הודעות למנהלים", `<p><small>ההקלטות נמצאות בקו בימות המשיח, בתיקיית ההקלטות, בשם הקובץ המוצג.</small></p>` +
     table([["phone", "טלפון"], ["audio", "קובץ הקלטה"], ["created_at", "זמן"], ["handled", "טופל"]],
-      await db(c).list("admin_messages", { order: "created_at.desc", limit: 300 }), (r) => delBtn("admin_messages", r.id)))));
+      await db(c).list("admin_messages", { order: "created_at.desc", limit: 300 }), (r) => toggleBtn("admin_messages", r.id, "handled", !r.handled, r.handled ? "סימון כלא טופל" : "סימון כטופל") + delBtn("admin_messages", r.id)))));
 
 admin.get("/partners", async (c) =>
   c.html(page("שותפים", table([["code", "קוד"], ["phone", "טלפון"], ["bank", "בנק"], ["branch", "סניף"], ["account", "חשבון"], ["active", "פעיל"]],
@@ -148,8 +194,14 @@ admin.post("/delete", async (c) => {
   return c.redirect(c.req.header("referer") || "/admin");
 });
 
+const TOGGLE_FIELDS = new Set(["active", "status", "handled"]);
+
 admin.post("/toggle", async (c) => {
   const f = await c.req.parseBody();
-  if (ALLOWED.has(String(f.table))) await db(c).update(String(f.table), { id: String(f.id) }, { active: f.to === "true" });
+  const field = String(f.field || "active");
+  if (ALLOWED.has(String(f.table)) && TOGGLE_FIELDS.has(field)) {
+    const value = field === "status" ? (f.to === "true" ? "closed" : "open") : f.to === "true";
+    await db(c).update(String(f.table), { id: String(f.id) }, { [field]: value });
+  }
   return c.redirect(c.req.header("referer") || "/admin");
 });

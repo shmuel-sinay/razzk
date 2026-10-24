@@ -8,7 +8,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test": "tsx test/sim.ts"
+    "test": "tsx test/sim.ts && tsx test/admin.test.ts"
   },
   "dependencies": {
     "hono": "4.6.14"
