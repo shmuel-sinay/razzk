@@ -3,20 +3,20 @@ import { calcFee } from "../settings";
 import { budgetFor, proMatches } from "../match";
 import { fmtDate, fmtTime, DAY_NAMES } from "../hebrew";
 import { sendTzintuk } from "../yemot";
-import {
-  type Ctx, type Sess, t, f, say, readDigits, readRecord, hangup, isEmpty,
-} from "./core";
+import { type Ctx, type Sess, t, f, say, readDigits, readRecord, isEmpty } from "./core";
 import { type Field, type FormDef, runForm } from "./forms";
 
 const STYLE_NAME: Record<string, string> = { hasidic: "חסידי", mizrahi: "מזרחי", both: "שני הסגנונות" };
 const ROLE_NAME: Record<string, string> = { organist: "אורגניסט", organist_singer: "אורגניסט וזמר", singer: "זמר" };
 const spell = (n: string) => n.split("").join(" ");
 
-// ───────────────────────── תפריט ראשי ─────────────────────────
+// ───────────────────────── חזרה לתפריט הראשי (בימות) ─────────────────────────
 
-export function mainMenu(ctx: Ctx, s: Sess): string {
-  s.node = "main"; s.data = {};
-  return readDigits(s, [t(ctx.settings.text_main_menu)], { min: 1, max: 1, allowed: "123467" });
+/** מסיים את השלב בשרת וחוזר לתפריט הראשי שבקו. הודעות שנצברו מושמעות לפני החזרה. */
+export function mainMenu(_ctx: Ctx, s: Sess): string {
+  s.node = "done"; s.data = {}; s.expect = undefined;
+  const parts = s.pre; s.pre = [];
+  return (parts.length ? `id_list_message=${parts.join(".")}&` : "") + "go_to_folder=/";
 }
 
 // ───────────────────────── הרשמה ─────────────────────────
@@ -192,9 +192,9 @@ export function buildForm(ctx: Ctx, id: string, p: Row): FormDef {
   throw new Error("unknown form " + id);
 }
 
-function startForm(ctx: Ctx, s: Sess, id: string, params: Row = {}): Promise<string> {
+function startForm(ctx: Ctx, s: Sess, id: string, params: Row = {}, pre: Row = {}): Promise<string> {
   s.node = "form";
-  s.data = { formId: id, params, i: 0, vals: {}, fails: 0 };
+  s.data = { formId: id, params, i: 0, vals: {}, fails: 0, pre };
   return runForm(ctx, s, buildForm(ctx, id, params), null);
 }
 
@@ -312,58 +312,10 @@ export async function route(ctx: Ctx, s: Sess, raw: string | undefined): Promise
   const nothing = isEmpty(raw);
 
   switch (s.node) {
-    case "start":
-      return mainMenu(ctx, s);
-
     case "form": {
       const form = buildForm(ctx, s.data.formId, s.data.params);
       return runForm(ctx, s, form, raw ?? "");
     }
-
-    case "main": {
-      if (nothing) return mainMenu(ctx, s);
-      switch (v) {
-        case "1": return intro(ctx, s, "client");
-        case "2": return intro(ctx, s, "pro");
-        case "3": return personalEntry(ctx, s);
-        case "4": return startForm(ctx, s, "pay");
-        case "6": return startForm(ctx, s, "msg");
-        case "7":
-          s.node = "partners";
-          return readDigits(s, [t(ctx.settings.text_partners), t("להשארת פרטים הקישו 1. לחזרה הקישו 9.")], { min: 1, max: 1, allowed: "19" });
-      }
-      return mainMenu(ctx, s);
-    }
-
-    case "intro": {
-      // שאלת התנאים
-      if (v === "1") {
-        if (s.data.kind === "pro") {
-          s.node = "pro_role";
-          return readDigits(s, [t("לאורגניסט בלבד הקישו 1. לאורגניסט וזמר הקישו 2. לזמר בלבד הקישו 3.")], { min: 1, max: 1, allowed: "123" });
-        }
-        s.node = "client_need";
-        return readDigits(s, [t("לבקשת אורגניסט בלבד הקישו 1. לאורגניסט וזמר הקישו 2.")], { min: 1, max: 1, allowed: "12" });
-      }
-      if (v === "2") { say(s, t("ללא אישור התנאים לא ניתן להמשיך.")); return mainMenu(ctx, s); }
-      return readDigits(s, [t(ctx.settings.text_terms_question)], { min: 1, max: 1, allowed: "12" });
-    }
-
-    case "pro_role": {
-      const role = ({ "1": "organist", "2": "organist_singer", "3": "singer" } as Row)[v];
-      if (!role) return readDigits(s, [t("לאורגניסט בלבד הקישו 1. לאורגניסט וזמר הקישו 2. לזמר בלבד הקישו 3.")], { min: 1, max: 1, allowed: "123" });
-      return startForm(ctx, s, "pro", { role });
-    }
-
-    case "client_need": {
-      const need = ({ "1": "organist", "2": "organist_singer" } as Row)[v];
-      if (!need) return readDigits(s, [t("לבקשת אורגניסט בלבד הקישו 1. לאורגניסט וזמר הקישו 2.")], { min: 1, max: 1, allowed: "12" });
-      return startForm(ctx, s, "client", { need });
-    }
-
-    case "partners":
-      if (v === "1") return startForm(ctx, s, "partner");
-      return mainMenu(ctx, s);
 
     case "personal_pick":
       s.data = { role: v === "1" ? "pro" : "client" };
@@ -476,15 +428,33 @@ export async function route(ctx: Ctx, s: Sess, raw: string | undefined): Promise
   return mainMenu(ctx, s);
 }
 
-async function intro(ctx: Ctx, s: Sess, kind: "pro" | "client"): Promise<string> {
-  const seen = await ctx.db.get("intro_seen", { phone: ctx.phone, kind });
-  if (!seen) {
-    await ctx.db.upsert("intro_seen", { phone: ctx.phone, kind }, "phone,kind");
-    say(s, t(kind === "pro" ? ctx.settings.text_intro_pro : ctx.settings.text_intro_client));
-  }
-  s.node = "intro";
-  s.data = { kind };
-  return readDigits(s, [t(ctx.settings.text_terms_question)], { min: 1, max: 1, allowed: "12" });
-}
+export { DAY_NAMES };
 
-export { hangup, DAY_NAMES };
+// ───────────────────────── התחלת שלוחת api מימות ─────────────────────────
+
+/** ימות אספה את התשובות לפי api_NNN ושלחה אותן יחד. כאן בודקים אותן ומשלימים מה שחסר. */
+export async function startFlow(ctx: Ctx, s: Sess, p: Record<string, string>): Promise<string> {
+  const v = (k: string) => (isEmpty(p[k]) ? undefined : p[k].trim());
+  const drop = (o: Row) => Object.fromEntries(Object.entries(o).filter(([, x]) => x !== undefined));
+  switch (p.flow) {
+    case "pro_register":
+      return startForm(ctx, s, "pro", { role: p.role }, drop({
+        name: v("NAME"), age: v("AGE"), city: v("CITY"), style: v("STYLE"), days: v("DAYS"),
+        hours: v("HSTART") && v("HEND") ? { start: v("HSTART"), end: v("HEND") } : undefined,
+        has_pa: v("PA"), min_price: v("MINPRICE"), phones: v("PHONE"), email_ok: v("EMAILOK"), tzintuk_ok: v("TZ"),
+      }));
+    case "client_register":
+      return startForm(ctx, s, "client", { need: p.need }, drop({
+        name: v("NAME"), city: v("CITY"), building: v("BUILDING"), hall_name: v("HALL"), style: v("STYLE"),
+        event_date: v("DATE"), start_time: v("START"), end_time: v("END"), has_pa: v("PA"),
+        max_organist: v("MAXORG"), max_singer: v("MAXSING"), allow_over: v("OVER"), phones: v("PHONE"), tzintuk_ok: v("TZ"),
+      }));
+    case "pay":
+      return startForm(ctx, s, "pay", {}, drop({ amount: v("AMOUNT"), via: v("CODE") ? "1" : "2", code: v("CODE") }));
+    case "partner":
+      return startForm(ctx, s, "partner", {}, drop({ bank: v("BANK"), branch: v("BRANCH"), account: v("ACCOUNT") }));
+    case "personal":
+      return personalEntry(ctx, s);
+  }
+  return mainMenu(ctx, s);
+}

@@ -163,6 +163,14 @@ export async function runForm(ctx: Ctx, s: Sess, form: FormDef, raw: string | nu
     if (!d.phase) {
       d.phase = "ask"; d.tries = d.tries ?? 0; d.sub = undefined; d.tmp = fld.kind === "hours" || fld.kind === "phones" ? [] : undefined;
       d.tries = 0;
+      if (d.pre && d.pre[fld.key] !== undefined) {
+        // ערך שכבר נאסף בימות המשיח (api_NNN): בודקים אותו בשרת במקום לשאול שוב
+        const pv = d.pre[fld.key];
+        delete d.pre[fld.key];
+        const r = await prefill(ctx, s, fld, pv);
+        if (r && "done" in r) { d.vals[fld.key] = r.done; d.i++; d.phase = undefined; continue; }
+        if (r && "out" in r) return r.out;
+      }
       const out = askField(ctx, s, fld);
       if (out === null) { d.vals[fld.key] = undefined; d.i++; d.phase = undefined; continue; }
       return out;
@@ -175,6 +183,28 @@ export async function runForm(ctx: Ctx, s: Sess, form: FormDef, raw: string | nu
     d.vals[fld.key] = r.done;
     d.i++; d.phase = undefined; d.tries = 0;
   }
+}
+
+/** ערך שהגיע מוכן מימות: אימות, ואם צריך — אישור מול המשתמש */
+async function prefill(ctx: Ctx, s: Sess, fld: Field, pv: any): Promise<Res | null> {
+  const d = s.data;
+  if (fld.kind === "hours") {
+    if (!pv || !validTime(pv.start) || !validTime(pv.end)) return null;
+    d.tmp = [pv]; d.sub = "menu";
+    return { out: askField(ctx, s, fld)! };
+  }
+  if (fld.kind === "phones") {
+    if (typeof pv !== "string" || !validPhone(pv)) return null;
+    d.tmp = [pv]; d.sub = "menu";
+    return { out: askField(ctx, s, fld)! };
+  }
+  if (typeof pv !== "string" || isEmpty(pv)) return null;
+  const p = await parse(ctx, s, fld, pv);
+  if (!p) return null;
+  const needConfirm = fld.confirm ?? ["text", "city", "days"].includes(fld.kind);
+  if (!needConfirm) return { done: p.cand };
+  d.cand = p.cand; d.readback = p.readback; d.phase = "confirm";
+  return { out: confirmOut(s, p.readback) };
 }
 
 async function handle(ctx: Ctx, s: Sess, fld: Field, raw: string | null): Promise<Res> {

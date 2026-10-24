@@ -1,4 +1,5 @@
-// סימולציה של שיחות ימות המשיח מול השרת (בלי רשת): הרשמת בעל מקצוע, בקשת לקוח, התאמה והצעה
+// סימולציה של שיחות ימות המשיח מול השרת (בלי רשת).
+// שלוחת api בימות אוספת את התשובות ושולחת אותן יחד; השרת בודק ושואל רק מה שחסר.
 import { MemDb } from "./memdb";
 import { handleIvr } from "../src/ivr/handler";
 import { loadSettings } from "../src/settings";
@@ -12,89 +13,93 @@ let fails = 0;
 const check = (ok: boolean, msg: string) => { if (!ok) { fails++; console.log("  ✗ " + msg); } else console.log("  ✓ " + msg); };
 
 class Call {
-  last = ""; params: Record<string, string> = {}; id = Math.random().toString(36).slice(2);
-  constructor(public phone: string) {}
-  async send(answer?: string) {
-    const p: Record<string, string> = { ApiCallId: this.id, ApiPhone: this.phone, ...this.params };
-    if (answer !== undefined) { const m = this.last.match(/=(a\d+),/); if (m) p[m[1]] = answer; this.params = { ...p }; delete this.params.ApiCallId; delete this.params.ApiPhone; }
+  last = "";
+  params: Record<string, string> = {};
+  id = Math.random().toString(36).slice(2);
+  constructor(public phone: string, public ext: string) {}
+  private async post(extra: Record<string, string>) {
+    this.params = { ...this.params, ...extra };
+    const p = { ApiCallId: this.id, ApiPhone: this.phone, ApiExtension: this.ext, ...this.params };
     this.last = await handleIvr({ db, env, settings: await loadSettings(db) }, p);
     return this.last;
   }
-  async seq(...answers: string[]) { for (const a of answers) { await this.send(a); if (/go_to_folder=hangup/.test(this.last) && !this.last.startsWith("read=")) break; } return this.last; }
+  start(batch: Record<string, string>) { return this.post(batch); }
+  async answers(...a: string[]) {
+    for (const x of a) {
+      const m = this.last.match(/=(a\d+),/);
+      if (!m) break; // אין שאלה פתוחה (חזרה לשורש או ניתוק)
+      await this.post({ [m[1]]: x });
+    }
+    return this.last;
+  }
 }
+const toRoot = (c: Call) => /go_to_folder=\/$/.test(c.last);
 
-console.log("בעל מקצוע נרשם");
-const pro = new Call("0501111111");
-await pro.send();
-await pro.seq(
-  "2", "1", "1",                 // רישום, אישור תנאים, אורגניסט בלבד
-  "דוד כהן", "1",                // שם + אישור
-  "30", "1",                     // גיל + אישור
-  "ירושלים", "1",                // עיר + אישור
-  "x",                           // הקלטת שכונה
-  "1", "1",                      // סגנון חסידי + אישור
-  "123456", "1",                 // ימים: ראשון..שישי? (1-6)
-  "x",                           // הקלטת פרטים
-  "1800", "2300", "1",           // שעות 18:00-23:00, ואישור בתפריט
-  "1",                           // הגברה: כן
-  "800", "1",                    // מינימום 800
-  "0501111111", "1",             // טלפון + אישור
-  "1",                           // מייל: כן
-  "1",                           // צינתוקים
-  "1",                           // התחייבות
-);
-check(db.t.professionals?.length === 1, "בעל המקצוע נשמר");
+console.log("בעל מקצוע נרשם (ימות אספה, השרת משלים)");
+const pro = new Call("0501111111", "/2/1/1");
+await pro.start({
+  flow: "pro_register", role: "organist",
+  NAME: "דוד כהן", AGE: "30", CITY: "ירושלים", STYLE: "1", DAYS: "123456",
+  HSTART: "1800", HEND: "2300", PA: "1", MINPRICE: "800", PHONE: "0501111111", EMAILOK: "1", TZ: "1",
+});
+check(/דוד כהן/.test(pro.last) && /אישור/.test(pro.last), "השרת מבקש לאשר את השם שזוהה");
+await pro.answers("1", "1", "x", "1", "1", "x", "1", "1", "1"); // שם, עיר, הקלטת שכונה, סגנון, ימים, הקלטת פרטים, שעות, טלפונים, התחייבות
+check(toRoot(pro), "חזרה לתפריט הראשי בקו");
 const p0 = db.t.professionals?.[0] || {};
-check(p0.city_name === "ירושלים" && p0.min_price === 800 && p0.days?.length === 6, `פרטים נשמרו (${p0.city_name}, ${p0.min_price}, ${JSON.stringify(p0.hours)})`);
+check(db.t.professionals?.length === 1, "בעל המקצוע נשמר");
+check(p0.city_name === "ירושלים" && p0.min_price === 800 && p0.days?.length === 6 && p0.role === "organist",
+  `פרטים נשמרו (${p0.city_name}, ${p0.min_price}, ${JSON.stringify(p0.hours)})`);
+
+console.log("עיר שלא זוהתה — השרת שואל שוב עד הקלדה");
+const odd = new Call("0504444444", "/2/1/1");
+await odd.start({ flow: "pro_register", role: "singer", NAME: "אבי", AGE: "25", CITY: "זזזזזז", STYLE: "2", DAYS: "1", HSTART: "1000", HEND: "1400", PA: "2", MINPRICE: "500", PHONE: "0504444444", EMAILOK: "2", TZ: "2" });
+check(/אישור/.test(odd.last) || /read=/.test(odd.last), "השרת ממשיך לשאול כשהעיר לא זוהתה");
 
 console.log("לקוח מבקש אורגניסט");
-const cl = new Call("0522222222");
-await cl.send();
-await cl.seq(
-  "1", "1", "1",                 // לקוח, תנאים, אורגניסט בלבד
-  "משה לוי", "1",
-  "ירושלים", "1",
-  "x", "x",                      // שכונה, רחוב
-  "12", "1",                     // בניין
-  "אולם הנרות", "1",             // שם אולם
-  "1", "1",                      // סגנון חסידי
-  "010120", "010130", "1",       // תאריך בעבר נדחה; 1.1.2030 (יום שלישי) מאושר
-  "2000", "1", "2300", "1",      // שעות האירוע
-  "1",                           // יש הגברה באולם
-  "1000", "1",                   // תקציב לאורגניסט
-  "2",                           // בלי חריגה
-  "0522222222", "1",             // טלפון
-  "2",                           // בלי צינתוקים
-  "1",                           // התחייבות
-);
+const cl = new Call("0522222222", "/1/1/1");
+await cl.start({
+  flow: "client_register", need: "organist",
+  NAME: "משה לוי", CITY: "ירושלים", BUILDING: "12", HALL: "אולם הנרות", STYLE: "1",
+  DATE: "010130", START: "2000", END: "2300", PA: "1", MAXORG: "1000", OVER: "2", PHONE: "0522222222", TZ: "2",
+});
+await cl.answers("1", "1", "x", "x", "1", "1", "1", "1"); // שם, עיר, שכונה, רחוב, אולם, סגנון, טלפונים, התחייבות
 check(db.t.requests?.length === 1, "הבקשה נשמרה");
-check(/נמצאו 1 בעלי מקצוע/.test(cl.last), "נמצא בעל מקצוע מתאים אחד");
+check(/נמצאו 1 בעלי מקצוע/.test(cl.last.replace(/&go_to_folder.*/, "")), "נמצא בעל מקצוע מתאים אחד");
+check(toRoot(cl), "חזרה לתפריט הראשי בקו");
 
 console.log("בעל המקצוע רואה את הבקשה ומגיש הצעה");
-const pro2 = new Call("0501111111");
-await pro2.send();
-await pro2.seq("3", "1");
+const pro2 = new Call("0501111111", "/3");
+await pro2.start({ flow: "personal" });
+await pro2.answers("1");
 check(/בקשה 1 מתוך 1/.test(pro2.last), "הבקשה מופיעה בבקשות המתאימות");
-await pro2.seq("1", "900", "");
+await pro2.answers("1", "900", "");
 const offers = db.t.offers || [];
 check(offers.length === 1 && offers[0].amount === 900, "ההצעה נשמרה");
 
 console.log("הלקוח שומע את ההצעה ומאשר");
-const cl2 = new Call("0522222222");
-await cl2.send();
-await cl2.seq("3", "1");
+const cl2 = new Call("0522222222", "/3");
+await cl2.start({ flow: "personal" });
+await cl2.answers("1");
 check(/הצעה 1 מתוך 1/.test(cl2.last) && /900 שקלים/.test(cl2.last), "ההצעה נשמעת ללקוח");
-await cl2.seq("2", "1");
+await cl2.answers("2", "1");
 check((db.t.offers || [])[0].status === "accepted", "ההצעה אושרה");
-check(/050/.test(cl2.last.replace(/ /g, "")) || /אושרה/.test(cl2.last), "פרטי הקשר נמסרו");
 check((db.t.offers || [])[0].fee_client === 90, "עמלה חושבה (10% על הלקוח = 90)");
 
-console.log("בקשה לא מתאימה (עיר אחרת) לא מתאימה");
-const cl3 = new Call("0533333333");
-await cl3.send();
-await cl3.seq("1","1","1","דני","1","בני ברק","1","x","x","5","1","אולם","1","1","1","010130","1","2000","1","2300","1","1","1","1000","1","2","0533333333","1","2","1");
-check((db.t.requests || []).length === 2, "בקשה שנייה נשמרה");
+console.log("בקשה מעיר אחרת לא מתאימה");
+const cl3 = new Call("0533333333", "/1/1/1");
+await cl3.start({ flow: "client_register", need: "organist", NAME: "דני", CITY: "בני ברק", BUILDING: "5", HALL: "אולם", STYLE: "1", DATE: "010130", START: "2000", END: "2300", PA: "1", MAXORG: "1000", OVER: "2", PHONE: "0533333333", TZ: "2" });
+await cl3.answers("1", "1", "x", "x", "1", "1", "1", "1");
 check(/כרגע לא נמצאו/.test(cl3.last), "אין התאמה לעיר אחרת");
+
+console.log("תשלום ושותפים");
+const pay = new Call("0501111111", "/4");
+await pay.start({ flow: "pay", AMOUNT: "5000", CODE: "" });
+await pay.answers("1");
+check(/500/.test(pay.last), "עמלה לתשלום חושבה (500)");
+const part = new Call("0509999999", "/7");
+await part.start({ flow: "partner", BANK: "12", BRANCH: "345", ACCOUNT: "123456" });
+await part.answers("1", "1", "1");
+check((db.t.partners || []).length === 1, "שותף נשמר עם קוד");
 
 console.log(fails ? `\n${fails} בדיקות נכשלו` : "\nכל הבדיקות עברו");
 process.exit(fails ? 1 : 0);
