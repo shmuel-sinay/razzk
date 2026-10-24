@@ -1,0 +1,23 @@
+{
+  "name": "razzk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "מערכת תיווך טלפונית (ימות המשיח) בין בעלי מקצוע ללקוחות — שרת Cloudflare Workers + Supabase",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx test/sim.ts"
+  },
+  "dependencies": {
+    "hono": "4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20241218.0",
+    "@types/node": "^22.20.5",
+    "tsx": "4.19.2",
+    "typescript": "5.7.2",
+    "wrangler": "3.99.0"
+  }
+}

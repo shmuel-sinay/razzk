@@ -1,0 +1,14 @@
+name = "razzk"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# ניקוי שיחות ישנות פעם ביום
+[triggers]
+crons = ["17 3 * * *"]
+
+# סודות (לא נשמרים בקוד) — מגדירים עם:
+#   npx wrangler secret put SUPABASE_URL
+#   npx wrangler secret put SUPABASE_SERVICE_KEY
+#   npx wrangler secret put IVR_SECRET        (מפתח שמופיע בכתובת ה-API בימות)
+#   npx wrangler secret put ADMIN_PASSWORD    (סיסמת אתר הניהול)
+#   npx wrangler secret put YEMOT_TOKEN       (אופציונלי: מספר-קו:סיסמה, לצינתוקים)

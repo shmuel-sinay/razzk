@@ -1,0 +1,39 @@
+import { Hono } from "hono";
+import type { Env } from "./types";
+import { SupabaseDb } from "./db";
+import { loadSettings } from "./settings";
+import { handleIvr } from "./ivr/handler";
+import { admin } from "./admin";
+
+const app = new Hono<{ Bindings: Env }>();
+
+app.get("/healthz", (c) => c.text("ok"));
+
+/**
+ * נקודת הכניסה של ימות המשיח (שלוחת api).
+ * כתובת ה-API בימות: https://<הדומיין>/ivr?k=<IVR_SECRET>
+ */
+app.all("/ivr", async (c) => {
+  const q = new URL(c.req.url).searchParams;
+  const params: Record<string, string> = Object.fromEntries(q);
+  if (c.req.method === "POST") {
+    const ct = c.req.header("content-type") || "";
+    if (ct.includes("form")) Object.assign(params, Object.fromEntries(await c.req.formData() as any));
+  }
+  if (!c.env.IVR_SECRET || params.k !== c.env.IVR_SECRET) return c.text("forbidden", 403);
+  const db = new SupabaseDb(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY);
+  const settings = await loadSettings(db);
+  const out = await handleIvr({ db, env: c.env, settings }, params);
+  return c.text(out, 200, { "Content-Type": "text/plain; charset=utf-8" });
+});
+
+app.route("/admin", admin);
+app.get("/", (c) => c.redirect("/admin"));
+
+export default {
+  fetch: app.fetch,
+  async scheduled(_e: ScheduledController, env: Env) {
+    const db = new SupabaseDb(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY);
+    await db.removeOlderThan("sessions", "updated_at", new Date(Date.now() - 24 * 3600 * 1000).toISOString());
+  },
+};
