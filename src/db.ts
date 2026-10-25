@@ -1,5 +1,7 @@
 import type { Db, ListOpts, Row } from "./types";
 
+const HAS_ID = new Set(["cities", "professionals", "clients", "requests", "offers", "admin_messages", "partners"]);
+
 /** לקוח קטן ל-PostgREST של Supabase (בלי תלויות חיצוניות) */
 export class SupabaseDb implements Db {
   constructor(private url: string, private key: string) {}
@@ -31,11 +33,22 @@ export class SupabaseDb implements Db {
     return rows[0] ?? null;
   }
 
+  /** Supabase מחזיר עד 1000 שורות לבקשה, לכן קוראים בעמודים עד המגבלה המבוקשת */
   async list(table: string, opts: ListOpts = {}) {
-    const p = this.qs(opts.match);
-    if (opts.order) p.set("order", opts.order);
-    if (opts.limit) p.set("limit", String(opts.limit));
-    return (await this.call(`${table}?${p}`, { headers: this.headers() })) ?? [];
+    const PAGE = 1000;
+    const want = opts.limit ?? Infinity;
+    const out: Row[] = [];
+    while (out.length < want) {
+      const p = this.qs(opts.match);
+      if (opts.order) p.set("order", opts.order);
+      else if (HAS_ID.has(table)) p.set("order", "id.asc"); // סדר יציב לעימוד
+      p.set("limit", String(Math.min(PAGE, want - out.length)));
+      p.set("offset", String(out.length));
+      const rows: Row[] = (await this.call(`${table}?${p}`, { headers: this.headers() })) ?? [];
+      out.push(...rows);
+      if (rows.length < PAGE || (!opts.order && !HAS_ID.has(table))) break;
+    }
+    return out;
   }
 
   async insert(table: string, row: Row) {
