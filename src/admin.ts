@@ -27,6 +27,19 @@ admin.use("*", async (c, next) => {
   return c.text("נדרשת הזדהות", 401, { "WWW-Authenticate": 'Basic realm="admin", charset="UTF-8"' });
 });
 
+/** שגיאה קריאה במקום דף ריק: הסיבה השכיחה היא סוד חסר או שגוי ב-Cloudflare */
+admin.onError((err, c) => {
+  const msg = String(err?.message || err);
+  const hint = !c.env.SUPABASE_URL || !c.env.SUPABASE_SERVICE_KEY
+    ? "חסר הסוד SUPABASE_URL או SUPABASE_SERVICE_KEY ב-Cloudflare (Settings ← Variables and Secrets)."
+    : /401|403|Invalid API key|JWT/i.test(msg)
+    ? "מפתח ה-Supabase (SUPABASE_SERVICE_KEY) שגוי. יש להעתיק את מפתח service_role או Secret key מחדש."
+    : /404|relation|does not exist/i.test(msg)
+    ? "טבלה חסרה במסד הנתונים. יש להריץ את supabase/migrations/001_init.sql."
+    : "";
+  return c.html(page("שגיאה", `<div class="card"><p><b>${esc(hint || "אירעה שגיאה")}</b></p><pre style="direction:ltr;white-space:pre-wrap">${esc(msg.slice(0, 600))}</pre></div>`), 500);
+});
+
 const db = (c: { env: Env }) => new SupabaseDb(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY);
 
 const NAV = [
