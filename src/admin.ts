@@ -3,11 +3,10 @@ import type { Env, Row } from "./types";
 import { SupabaseDb } from "./db";
 import { DEFAULTS, loadSettings } from "./settings";
 import { normalize } from "./hebrew";
+import { esc, page, table, delBtn } from "./ui";
+import { web } from "./admin_web";
 
 export const admin = new Hono<{ Bindings: Env }>();
-
-const esc = (v: any) =>
-  String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
 function safeEqual(a: string, b: string): boolean {
   const x = new TextEncoder().encode(a), y = new TextEncoder().encode(b);
@@ -42,43 +41,6 @@ admin.onError((err, c) => {
 
 const db = (c: { env: Env }) => new SupabaseDb(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY);
 
-const NAV = [
-  ["", "סקירה"], ["settings", "הגדרות והודעות"], ["pros", "בעלי מקצוע"], ["clients", "לקוחות"],
-  ["requests", "בקשות"], ["offers", "הצעות"], ["messages", "הודעות למנהלים"], ["partners", "שותפים"], ["cities", "ערים"],
-];
-
-function page(title: string, body: string): string {
-  return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} — ניהול</title>
-<style>
-body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f5f6f8;color:#1c1e21}
-nav{background:#1f3a5f;padding:10px 16px;display:flex;flex-wrap:wrap;gap:6px}
-nav a{color:#fff;text-decoration:none;padding:6px 10px;border-radius:6px;font-size:15px}
-nav a:hover{background:#2f5388}
-main{max-width:1000px;margin:20px auto;padding:0 16px}
-h1{font-size:22px} table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden}
-th,td{padding:8px 10px;border-bottom:1px solid #e4e6ea;text-align:right;font-size:14px;vertical-align:top}
-th{background:#eef1f6}
-input[type=text],textarea,select{width:100%;box-sizing:border-box;padding:7px;border:1px solid #c5cad3;border-radius:6px;font:inherit}
-textarea{min-height:70px}
-button{background:#1f3a5f;color:#fff;border:0;padding:8px 16px;border-radius:6px;font:inherit;cursor:pointer}
-button.d{background:#b3261e} .card{background:#fff;padding:14px;border-radius:8px;margin-bottom:12px}
-.k{display:inline-block;background:#fff;border-radius:8px;padding:14px 22px;margin:0 0 10px 10px;text-align:center}
-.k b{display:block;font-size:26px} small{color:#666}
-</style></head><body>
-<nav>${NAV.map(([p, l]) => `<a href="/admin/${p}">${l}</a>`).join("")}</nav>
-<main><h1>${esc(title)}</h1>${body}</main></body></html>`;
-}
-
-function table(cols: [string, string][], rows: Row[], extra?: (r: Row) => string): string {
-  return `<table><tr>${cols.map(([, h]) => `<th>${h}</th>`).join("")}${extra ? "<th></th>" : ""}</tr>${rows
-    .map((r) => `<tr>${cols.map(([k]) => `<td>${esc(typeof r[k] === "object" ? JSON.stringify(r[k]) : r[k])}</td>`).join("")}${extra ? `<td>${extra(r)}</td>` : ""}</tr>`)
-    .join("")}</table>`;
-}
-
-const delBtn = (table: string, id: string) =>
-  `<form method="post" action="/admin/delete" onsubmit="return confirm('למחוק?')"><input type="hidden" name="table" value="${table}"><input type="hidden" name="id" value="${id}"><button class="d">מחיקה</button></form>`;
-
 admin.get("/", async (c) => {
   const d = db(c);
   const counts = await Promise.all(["professionals", "clients", "requests", "offers", "admin_messages"].map(async (t) => (await d.list(t, { limit: 5000 })).length));
@@ -105,6 +67,9 @@ admin.post("/settings", async (c) => {
   return c.redirect("/admin/settings");
 });
 
+// טפסי הוספה/עריכה והתאמות (חייבים להירשם לפני נתיבים עם פרמטר)
+admin.route("/", web);
+
 const search = (rows: Row[], q: string) =>
   q ? rows.filter((r) => JSON.stringify(Object.values(r)).includes(q)) : rows;
 const searchBox = (path: string, q: string) =>
@@ -115,34 +80,10 @@ const toggleBtn = (tbl: string, id: string, field: string, to: boolean, label: s
 admin.get("/pros", async (c) => {
   const q = c.req.query("q") || "";
   const rows = search(await db(c).list("professionals", { order: "created_at.desc", limit: 1000 }), q);
-  return c.html(page("בעלי מקצוע", searchBox("pros", q) + table(
+  return c.html(page("בעלי מקצוע", `<p><a href="/admin/pros/new"><button>+ הוספת בעל מקצוע</button></a></p>` + searchBox("pros", q) + table(
     [["name", "שם"], ["phone", "טלפון"], ["role", "תפקיד"], ["city_name", "עיר"], ["style", "סגנון"], ["days", "ימים"], ["hours", "שעות"], ["min_price", "מינימום"], ["active", "פעיל"]],
     rows, (r) => `<a href="/admin/pros/${r.id}"><button>עריכה</button></a>` + toggleBtn("professionals", r.id, "active", !r.active, r.active ? "השבתה" : "הפעלה") + delBtn("professionals", r.id),
   )));
-});
-
-admin.get("/pros/:id", async (c) => {
-  const r = await db(c).get("professionals", { id: c.req.param("id") });
-  if (!r) return c.text("לא נמצא", 404);
-  const f = (k: string, label: string, v: any) => `<p><label><b>${label}</b><br><input type="text" name="${k}" value="${esc(v)}"></label></p>`;
-  return c.html(page("עריכת בעל מקצוע", `<form method="post" class="card">
-${f("name", "שם", r.name)}${f("age", "גיל", r.age)}${f("city_name", "עיר", r.city_name)}${f("min_price", "סכום מינימלי", r.min_price)}
-${f("contact_phones", "טלפונים לקבלת הזמנות (מופרדים בפסיק)", (r.contact_phones || []).join(","))}
-<p><label><b>סגנון</b><br><select name="style">${["hasidic:חסידי", "mizrahi:מזרחי", "both:שניהם"].map((o) => { const [v, l] = o.split(":"); return `<option value="${v}"${r.style === v ? " selected" : ""}>${l}</option>`; }).join("")}</select></label></p>
-<p><label><input type="checkbox" name="has_pa" value="1"${r.has_pa ? " checked" : ""}> יש הגברה</label> &nbsp; <label><input type="checkbox" name="active" value="1"${r.active ? " checked" : ""}> פעיל</label></p>
-<p><small>טלפון הרישום: ${esc(r.phone)} · תפקיד: ${esc(r.role)} · ימים: ${esc(JSON.stringify(r.days))} · שעות: ${esc(JSON.stringify(r.hours))}</small></p>
-<button>שמירה</button></form>`));
-});
-
-admin.post("/pros/:id", async (c) => {
-  const f = await c.req.parseBody();
-  await db(c).update("professionals", { id: c.req.param("id") }, {
-    name: String(f.name || ""), age: Number(f.age) || null, city_name: String(f.city_name || ""),
-    min_price: Number(f.min_price) || 0, style: String(f.style),
-    contact_phones: String(f.contact_phones || "").split(",").map((x) => x.trim()).filter(Boolean),
-    has_pa: f.has_pa === "1", active: f.active === "1",
-  });
-  return c.redirect("/admin/pros");
 });
 
 admin.get("/clients", async (c) => {
@@ -154,9 +95,9 @@ admin.get("/clients", async (c) => {
 admin.get("/requests", async (c) => {
   const q = c.req.query("q") || "";
   const rows = search(await db(c).list("requests", { order: "created_at.desc", limit: 1000 }), q);
-  return c.html(page("בקשות", searchBox("requests", q) + table(
+  return c.html(page("בקשות", `<p><a href="/admin/requests/new"><button>+ בקשה חדשה</button></a></p>` + searchBox("requests", q) + table(
     [["client_name", "לקוח"], ["client_phone", "טלפון"], ["need", "מבוקש"], ["city_name", "עיר"], ["hall_name", "אולם"], ["event_date", "תאריך"], ["start_time", "מ"], ["end_time", "עד"], ["max_organist", "תקציב אורגניסט"], ["max_singer", "תקציב זמר"], ["status", "סטטוס"]],
-    rows, (r) => toggleBtn("requests", r.id, "status", r.status !== "open", r.status === "open" ? "סגירה" : "פתיחה מחדש") + delBtn("requests", r.id))));
+    rows, (r) => `<a href="/admin/requests/${r.id}"><button>התאמות</button></a>` + toggleBtn("requests", r.id, "status", r.status !== "open", r.status === "open" ? "סגירה" : "פתיחה מחדש") + delBtn("requests", r.id))));
 });
 
 admin.get("/offers", async (c) => {
