@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Env } from "./types";
 import { SupabaseDb } from "./db";
 import { loadSettings } from "./settings";
+import { normalize } from "./hebrew";
 import { handleIvr } from "./ivr/handler";
 import { admin } from "./admin";
 import { pub } from "./public";
@@ -26,6 +27,15 @@ app.all("/ivr", async (c) => {
   const settings = await loadSettings(db);
   const out = await handleIvr({ db, env: c.env, settings }, params);
   return c.text(out, 200, { "Content-Type": "text/plain; charset=utf-8" });
+});
+
+/** שכונות לפי עיר — להשלמה אוטומטית בטפסים (ציבורי, ללא נתונים רגישים) */
+app.get("/api/neighborhoods", async (c) => {
+  const city = c.req.query("city") || "";
+  const db = new SupabaseDb(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY);
+  const n = normalize(city);
+  const rows = n ? (await db.list("neighborhoods", { limit: 20000 })).filter((x) => x.approved !== false && normalize(x.city) === n) : [];
+  return c.json({ items: rows.map((x) => x.name).sort((a: string, b: string) => a.localeCompare(b, "he")) }, 200, { "Cache-Control": "public, max-age=300" });
 });
 
 app.route("/admin", admin);

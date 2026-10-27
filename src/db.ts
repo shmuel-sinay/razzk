@@ -1,6 +1,6 @@
 import type { Db, ListOpts, Row } from "./types";
 
-const HAS_ID = new Set(["cities", "professionals", "clients", "requests", "offers", "admin_messages", "partners", "public_hits"]);
+const HAS_ID = new Set(["cities", "professionals", "clients", "requests", "offers", "admin_messages", "partners", "public_hits", "neighborhoods"]);
 
 /** לקוח קטן ל-PostgREST של Supabase (בלי תלויות חיצוניות) */
 export class SupabaseDb implements Db {

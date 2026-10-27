@@ -7,6 +7,7 @@ import { pub } from "../src/public";
 import { scorePro } from "../src/auto";
 import { DEFAULTS } from "../src/settings";
 import { proMatches } from "../src/match";
+import app from "../src/index";
 
 const mem = new MemDb();
 for (const name of ["ירושלים", "בני ברק", "רמת גן", "פתח תקווה", "תל אביב - יפו"]) await mem.insert("cities", { name, normalized: normalize(name) });
@@ -70,7 +71,7 @@ r = await post("/requests/new", [
 const req = (await mem.list("requests"))[0];
 check(r.status === 302 && !!req && req.start_time === "2000", "הבקשה נשמרה");
 const matchPage = await (await get(`/requests/${req.id}`)).text();
-check(matchPage.includes("דוד כהן") && matchPage.includes("בעלי מקצוע מתאימים (1)"), "בעל המקצוע מוצע כהתאמה");
+check(matchPage.includes("דוד כהן") && /בעלי מקצוע מתאימים <span class="badge brand">1<\/span>/.test(matchPage), "בעל המקצוע מוצע כהתאמה");
 check((await (await get("/matches")).text()).includes("משה לוי"), "הבקשה מופיעה ברשימת ההתאמות");
 
 console.log("הצעה אוטומטית ואישור");
@@ -86,7 +87,7 @@ check((await mem.list("offers")).some((o: any) => o.source === "web" && o.amount
 console.log("בקשה בעיר אחרת לא מותאמת");
 await post("/requests/new", [["client_name", "דני"], ["client_phone", "0533333333"], ["need", "organist"], ["city_name", "אילת"], ["style", "hasidic"], ["event_date", "2030-01-01"], ["start_time", "20:00"], ["end_time", "23:00"], ["has_pa", "1"], ["max_organist", "1000"]]);
 const req2 = (await mem.list("requests"))[1];
-check((await (await get(`/requests/${req2.id}`)).text()).includes("בעלי מקצוע מתאימים (0)"), "אין התאמה לעיר אחרת");
+check(/בעלי מקצוע מתאימים <span class="badge brand">0<\/span>/.test(await (await get(`/requests/${req2.id}`)).text()), "אין התאמה לעיר אחרת");
 check((await (await get(`/requests/${req2.id}`)).text()).includes("לא נמצאה במאגר"), "אזהרה על עיר שלא במאגר");
 
 console.log("עריכת בעל מקצוע");
@@ -135,7 +136,7 @@ const newOffers = (await mem.list("offers")).slice(before);
 check(newOffers.length === 3 && newOffers.every((o: any) => o.auto), "נוצרו בדיוק 3 הצעות אוטומטיות (המגבלה בהגדרות)");
 check(newOffers[0] && newOffers.map((o: any) => Number(o.score)).every((x: number) => x > 0), "לכל הצעה ציון");
 const page1 = await (await pget(loc)).text();
-check(page1.includes("ההצעות שלכם") && page1.includes("אני מאשר את ההצעה"), "דף הלקוח מציג הצעות עם כפתור אישור");
+check(page1.includes("ההצעות שלכם") && page1.includes("אני מאשר"), "דף הלקוח מציג הצעות עם כפתור אישור");
 check(page1.includes("יעקב טוב") && !page1.includes("אבי זול"), "נבחרו הטובים ביותר: הדירוג הגבוה מופיע, והזול עם הדירוג הנמוך לא");
 check(!page1.includes("0505555555"), "פרטי הקשר לא נחשפים לפני אישור");
 
@@ -143,7 +144,7 @@ const firstOffer = newOffers[0];
 await ppost(`${loc}/accept`, [["offer_id", firstOffer.id]]);
 const accepted = (await mem.list("offers")).find((o: any) => o.id === firstOffer.id)!;
 check(accepted.status === "accepted" && accepted.fee_client > 0, "אישור ההצעה מהדף הציבורי חישב עמלה");
-check((await (await pget(loc)).text()).includes("הטלפון של"), "אחרי אישור מוצגים פרטי הקשר");
+check((await (await pget(loc)).text()).includes("ליצירת קשר"), "אחרי אישור מוצגים פרטי הקשר");
 
 const tok = (await mem.list("professionals")).find((x: any) => x.phone === "0505555555")!.public_token;
 const pp = await (await pget(`/p/${tok}`)).text();
@@ -179,6 +180,27 @@ const rq2 = await ppost("/request", [
 ], "7.7.7.7");
 const gdOffers = (await mem.list("offers")).filter((o: any) => o.pro_id === gd.id);
 check(rq2.status === 302 && gdOffers.length === 1 && gdOffers[0].auto, "בקשה ברמת גן קיבלה הצעה אוטומטית מבעל מקצוע מבני ברק (גוש דן)");
+
+
+console.log("מאגר שכונות, בורר שעה ועיצוב");
+await mem.insert("neighborhoods", { city: "ירושלים", name: "רמות א׳" });
+await mem.insert("neighborhoods", { city: "ירושלים", name: "ממתינה", approved: false });
+const api = await app.fetch(new Request("http://x/api/neighborhoods?city=" + encodeURIComponent("ירושלים")), env);
+const apiJson: any = await api.json();
+check(apiJson.items.includes("רמות א׳") && !apiJson.items.includes("ממתינה"), "ה-API מחזיר שכונות מאושרות לפי העיר ומסתיר ממתינות");
+check(((await (await app.fetch(new Request("http://x/api/neighborhoods?city=אילת"), env)).json()) as any).items.length === 0, "עיר בלי שכונות מחזירה רשימה ריקה");
+check((await get("/neighborhoods")).status === 200, "דף ניהול השכונות נטען");
+const jp = await ppost("/join", [
+  ["phone", "0526767676"], ["role", "organist"], ["name", "שכונה חדשה"], ["city_name", "ירושלים"], ["neighborhood", "שכונת מבחן חדשה"],
+  ["style", "both"], ["days", "1"], ["hs0_h", "09"], ["hs0_m", "30"], ["he0_h", "17"], ["he0_m", "45"], ["min_price", "400"], ["ts", old],
+], "8.8.8.8");
+const np = (await mem.list("professionals")).find((x: any) => x.phone === "0526767676");
+check(jp.status === 302 && JSON.stringify(np?.hours) === JSON.stringify([{ start: "0930", end: "1745" }]), "בורר שעה (שעות ודקות נפרדות) נקרא נכון");
+const learned = (await mem.list("neighborhoods")).find((x: any) => x.name === "שכונת מבחן חדשה");
+check(!!learned && learned.approved === false, "שכונה חדשה מהדף הציבורי נשמרת כממתינה לאישור");
+const jo = await get("/pros/new");
+check((await jo.text()).includes('name="hs0_h"'), "טופס בעל מקצוע כולל בורר שעה");
+check((await (await pget("/")).text()).includes("מוצאים אורגניסט"), "דף הבית החדש נטען");
 
 globalThis.fetch = realFetch;
 console.log(fails ? `${fails} נכשלו` : "אתר הניהול תקין");
