@@ -4,6 +4,7 @@ import { budgetFor, proMatches } from "../match";
 import { fmtDate, fmtTime, DAY_NAMES } from "../hebrew";
 import { sendTzintuk } from "../yemot";
 import { autoOffer } from "../auto";
+import { REGIONS } from "../regions";
 import { type Ctx, type Sess, t, f, say, readDigits, readRecord, isEmpty } from "./core";
 import { type Field, type FormDef, runForm } from "./forms";
 
@@ -29,6 +30,14 @@ function proFields(ctx: Ctx): Field[] {
     { key: "name", kind: "text", prompt: "אנא אמרו את שמכם ואת שם משפחתכם." },
     { key: "age", kind: "number", prompt: "הקישו את גילכם ובסיומו סולמית.", min: 1, max: 2, validate: (n) => n >= 14 && n <= 99 },
     { key: "city", kind: "city", prompt: "אנא אמרו את שם העיר או הישוב בו תרצו לתת שירות." },
+    {
+      key: "region", kind: "choice", confirm: true,
+      prompt: "לקבלת בקשות רק מהעיר שלכם הקישו 1. לקבלת בקשות מכל גוש דן הקישו 2. מירושלים והסביבה 3. ממרכז ושפלה 4. מהשרון 5. מהדרום 6. מהצפון 7.",
+      choices: [
+        { d: "1", label: "רק העיר שלכם", value: "" },
+        ...["gush_dan", "jerusalem", "center", "sharon", "south", "north"].map((k, i) => ({ d: String(i + 2), label: REGIONS[k].label, value: k })),
+      ],
+    },
     { key: "neighborhood_audio", kind: "record", prompt: "אנא אמרו את שם השכונה ובסיום הקישו סולמית.", recSec: 10, recPrefix: "neigh" },
     {
       key: "style", kind: "choice", confirm: true,
@@ -84,6 +93,7 @@ function proRow(ctx: Ctx, v: Row): Row {
   const r: Row = {};
   for (const k of ["name", "age", "neighborhood_audio", "style", "bio_audio", "has_pa", "min_price", "tzintuk_ok"]) if (k in v) r[k] = v[k];
   if (v.city) { r.city_id = v.city.id; r.city_name = v.city.name; }
+  if ("region" in v) r.region = v.region || null;
   if (v.days) r.days = v.days;
   if (v.hours) r.hours = v.hours;
   if (v.phones) r.contact_phones = v.phones;
@@ -238,7 +248,7 @@ function personalMenu(ctx: Ctx, s: Sess): string {
 }
 
 const PRO_EDIT: [string, string][] = [
-  ["name", "שם ומשפחה"], ["age", "גיל"], ["city", "עיר"], ["neighborhood_audio", "שכונה"], ["style", "סגנון נגינה"],
+  ["name", "שם ומשפחה"], ["age", "גיל"], ["city", "עיר"], ["region", "אזור שירות"], ["neighborhood_audio", "שכונה"], ["style", "סגנון נגינה"],
   ["days", "ימי זמינות"], ["bio_audio", "פרטים על ההתמקצעות"], ["hours", "שעות זמינות"], ["has_pa", "הגברה"],
   ["min_price", "סכום מינימלי"], ["phones", "מספרי טלפון"], ["email_ok", "שליחת הקלטה במייל"], ["tzintuk_ok", "צינתוקים"],
 ];

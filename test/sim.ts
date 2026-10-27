@@ -43,10 +43,11 @@ await pro.start({
   HSTART: "1800", HEND: "2300", PA: "1", MINPRICE: "800", PHONE: "0501111111", EMAILOK: "1", TZ: "1",
 });
 check(/ירושלים/.test(pro.last) && /אישור/.test(pro.last), "השרת מבקש לאשר את העיר שזוהתה");
-await pro.answers("1", "x", "1", "1", "x", "1", "1", "1"); // עיר, הקלטת שכונה, סגנון, ימים, הקלטת פרטים, שעות, טלפונים, התחייבות
+await pro.answers("1", "2", "1", "x", "1", "1", "x", "1", "1", "1"); // אישור עיר, אזור (גוש דן) ואישורו, הקלטת שכונה, סגנון, ימים, הקלטת פרטים, שעות, טלפונים, התחייבות
 check(toRoot(pro), "חזרה לתפריט הראשי בקו");
 const p0 = db.t.professionals?.[0] || {};
 check(db.t.professionals?.length === 1, "בעל המקצוע נשמר");
+check(p0.region === "gush_dan", "אזור השירות נשמר מההרשמה בטלפון");
 check(p0.city_name === "ירושלים" && p0.min_price === 800 && p0.days?.length === 6 && p0.role === "organist",
   `פרטים נשמרו (${p0.city_name}, ${p0.min_price}, ${JSON.stringify(p0.hours)})`);
 
@@ -83,9 +84,15 @@ check((db.t.offers || [])[0].fee_client === 80, "עמלה חושבה (10% על �
 
 console.log("בקשה מעיר אחרת לא מתאימה");
 const cl3 = new Call("0533333333", "/1/1/1");
-await cl3.start({ flow: "client_register", need: "organist", NAME: "דני", CITY: "בני ברק", BUILDING: "5", HALL: "אולם", STYLE: "1", DATE: "010130", START: "2000", END: "2300", PA: "1", MAXORG: "1000", OVER: "2", PHONE: "0533333333", TZ: "2" });
+await cl3.start({ flow: "client_register", need: "organist", NAME: "דני", CITY: "אלעד", BUILDING: "5", HALL: "אולם", STYLE: "1", DATE: "010130", START: "2000", END: "2300", PA: "1", MAXORG: "1000", OVER: "2", PHONE: "0533333333", TZ: "2" });
 await cl3.answers("1", "x", "x", "1", "1", "1");
 check(/כרגע לא נמצאו/.test(cl3.last), "אין התאמה לעיר אחרת");
+
+console.log("לקוח בבני ברק מתאים לבעל מקצוע שבחר גוש דן");
+const cl4 = new Call("0544444444", "/1/1/1");
+await cl4.start({ flow: "client_register", need: "organist", NAME: "חיים", CITY: "בני ברק", BUILDING: "7", HALL: "אולם", STYLE: "1", DATE: "010130", START: "2000", END: "2300", PA: "1", MAXORG: "1000", OVER: "2", PHONE: "0544444444", TZ: "2" });
+await cl4.answers("1", "x", "x", "1", "1", "1");
+check(/נמצאו 1 בעלי מקצוע/.test(cl4.last.replace(/&go_to_folder.*/, "")), "בעל המקצוע מירושלים עם אזור גוש דן נמצא לבקשה בבני ברק");
 
 console.log("תשלום ושותפים");
 const pay = new Call("0501111111", "/4");
