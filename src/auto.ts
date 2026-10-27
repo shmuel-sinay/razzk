@@ -1,6 +1,6 @@
 import type { Db, Env, Row } from "./types";
 import type { Settings } from "./settings";
-import { proMatches, budgetFor } from "./match";
+import { proMatches, budgetFor, sameCity } from "./match";
 import { normalize } from "./hebrew";
 import { sendTzintuk } from "./yemot";
 
@@ -12,7 +12,10 @@ export function scorePro(pro: Row, req: Row, s: Settings): number {
   const quality = clamp((Number(pro.rating ?? 3)) / 5);
   const budget = budgetFor(pro.role, req, Number(s.over_budget_percent || 15));
   const price = budget > 0 ? clamp(1 - Number(pro.min_price || 0) / budget) : 0;
-  const hood = pro.neighborhood && req.neighborhood
+  // קרבה: אותה עיר (ושכונה זהה = מקסימום); עיר סמוכה באזור השירות מקבלת ציון נמוך יותר
+  const hood = !sameCity(pro, req)
+    ? 0.2
+    : pro.neighborhood && req.neighborhood
     ? normalize(pro.neighborhood) === normalize(req.neighborhood) ? 1 : 0.3
     : 0.5;
   const total = wq + wp + wa || 1;

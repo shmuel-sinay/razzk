@@ -6,6 +6,7 @@ import { normalize, fmtDate, fmtTime, DAY_NAMES } from "./hebrew";
 import { proMatches, budgetFor } from "./match";
 import { autoOffer, fillOpenRequests, scorePro } from "./auto";
 import { esc, page, table } from "./ui";
+import { REGIONS } from "./regions";
 
 /** טפסי הוספה ועריכה, והתאמות (שידוכים) — הכול דרך האתר */
 export const web = new Hono<{ Bindings: Env }>();
@@ -55,6 +56,8 @@ ${sel("role", "תפקיד", [["organist", "אורגניסט"], ["organist_singer
 ${inp("name", "שם ומשפחה", r.name)}${inp("age", "גיל", r.age, "number")}
 <p><label><b>עיר או ישוב</b><br><input type="text" name="city_name" list="cities" value="${esc(r.city_name)}"></label></p>${cityDatalist(cities)}
 ${inp("neighborhood", "שכונה", r.neighborhood)}
+${sel("region", "אזור שירות (מקבלים בקשות מכל הערים באזור)", [["", "רק העיר שלי"], ...Object.entries(REGIONS).map(([k, v]) => [k, v.label] as [string, string])], r.region || "")}
+${inp("extra_cities", "ערים נוספות לשירות (מופרדות בפסיק, למשל: פתח תקווה, בני ברק)", (r.extra_cities || []).join(", "))}
 ${sel("style", "סגנון נגינה", [["hasidic", "חסידי"], ["mizrahi", "מזרחי"], ["both", "שני הסגנונות"]], r.style || "both")}
 <p><b>ימי זמינות</b><br>${[1, 2, 3, 4, 5, 6, 7].map((n) => chk("days", DAY_NAMES[n], (r.days || []).includes(n), String(n))).join("")}</p>
 <p><b>שעות זמינות</b> (אפשר עד שלושה חלונות; סיום אחרי חצות נתמך, למשל 21:00 עד 01:00)</p>${hr}
@@ -71,13 +74,17 @@ function proForm(r: Row, cities: Row[], action: string, title: string): string {
 }
 
 export async function proFromForm(d: SupabaseDb, f: Row, admin = true): Promise<Row> {
-  const city = resolveCity(await cityList(d), String(f.city_name || ""));
+  const cities = await cityList(d);
+  const city = resolveCity(cities, String(f.city_name || ""));
   const hours = [0, 1, 2]
     .filter((i) => f[`hs${i}`] && f[`he${i}`])
     .map((i) => ({ start: hhmm(String(f[`hs${i}`])), end: hhmm(String(f[`he${i}`])) }));
   return {
     role: String(f.role), name: String(f.name || ""), age: Number(f.age) || null,
     city_id: city.id, city_name: city.name, neighborhood: String(f.neighborhood || ""),
+    region: REGIONS[String(f.region)] ? String(f.region) : null,
+    extra_cities: String(f.extra_cities || "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 8)
+      .map((x) => resolveCity(cities, x).name),
     style: String(f.style), days: arr(f.days).map(Number).sort(), hours,
     bio: String(f.bio || "").slice(0, 600), has_pa: f.has_pa === "1", tzintuk_ok: f.tzintuk_ok === "1",
     ...(admin ? { active: f.active === "1", rating: Math.max(1, Math.min(5, Number(f.rating) || 3)), notes: String(f.notes || "") } : {}),

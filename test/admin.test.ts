@@ -6,9 +6,10 @@ import { normalize } from "../src/hebrew";
 import { pub } from "../src/public";
 import { scorePro } from "../src/auto";
 import { DEFAULTS } from "../src/settings";
+import { proMatches } from "../src/match";
 
 const mem = new MemDb();
-await mem.insert("cities", { name: "ירושלים", normalized: normalize("ירושלים") });
+for (const name of ["ירושלים", "בני ברק", "רמת גן", "פתח תקווה", "תל אביב - יפו"]) await mem.insert("cities", { name, normalized: normalize(name) });
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (url: any, init: any = {}) => {
   const u = new URL(String(url));
@@ -83,7 +84,7 @@ await post(`/requests/${req.id}/offer`, [["pro_id", pro.id], ["amount", "900"]])
 check((await mem.list("offers")).some((o: any) => o.source === "web" && o.amount === 900), "אפשר גם להצעה ידנית מהאתר");
 
 console.log("בקשה בעיר אחרת לא מותאמת");
-await post("/requests/new", [["client_name", "דני"], ["client_phone", "0533333333"], ["need", "organist"], ["city_name", "בני ברק"], ["style", "hasidic"], ["event_date", "2030-01-01"], ["start_time", "20:00"], ["end_time", "23:00"], ["has_pa", "1"], ["max_organist", "1000"]]);
+await post("/requests/new", [["client_name", "דני"], ["client_phone", "0533333333"], ["need", "organist"], ["city_name", "אילת"], ["style", "hasidic"], ["event_date", "2030-01-01"], ["start_time", "20:00"], ["end_time", "23:00"], ["has_pa", "1"], ["max_organist", "1000"]]);
 const req2 = (await mem.list("requests"))[1];
 check((await (await get(`/requests/${req2.id}`)).text()).includes("בעלי מקצוע מתאימים (0)"), "אין התאמה לעיר אחרת");
 check((await (await get(`/requests/${req2.id}`)).text()).includes("לא נמצאה במאגר"), "אזהרה על עיר שלא במאגר");
@@ -154,6 +155,30 @@ check((await pget("/r/not-a-token")).status === 404 && (await pget("/p/not-a-tok
 let limited = 0;
 for (let i = 0; i < 10; i++) { const x = await ppost("/join", [["phone", "12"], ["ts", old]], "9.9.9.9"); if (x.status === 400 && (await x.text()).includes("יותר מדי")) limited++; }
 check(limited > 0, "הגבלת קצב לכתובת עובדת");
+
+
+console.log("אזורי שירות (גוש דן) וערים נוספות");
+const base = { active: true, role: "organist", style: "both", days: [1, 2, 3, 4, 5, 6], hours: [{ start: "1000", end: "2300" }], has_pa: true, min_price: 500 };
+const reqRG = { city_name: "רמת גן", style: "hasidic", event_date: "2031-03-02", start_time: "2000", end_time: "2200", has_pa: true, max_organist: 1000, need: "organist" };
+check(proMatches({ ...base, city_name: "בני ברק", region: "gush_dan" }, reqRG), "בעל מקצוע מבני ברק עם אזור גוש דן מתאים לבקשה ברמת גן");
+check(!proMatches({ ...base, city_name: "בני ברק", region: null }, reqRG), "בלי אזור — בני ברק לא מתאימה לרמת גן");
+check(proMatches({ ...base, city_name: "ירושלים", extra_cities: ["רמת גן"] }, reqRG), "עיר נוספת שנבחרה מתאימה");
+check(!proMatches({ ...base, city_name: "ירושלים", region: "jerusalem" }, reqRG), "אזור ירושלים לא מכסה את רמת גן");
+check(proMatches({ ...base, city_name: "תל אביב יפו", region: "gush_dan" }, { ...reqRG, city_name: "קריית אונו" }), "שמות עם קרית/קריית ומקף מזוהים כאותה עיר");
+
+r = await post("/pros/new", [
+  ["phone", "0541212121"], ["role", "organist"], ["name", "גוש דן טוב"], ["city_name", "בני ברק"], ["region", "gush_dan"],
+  ["extra_cities", "פתח תקווה, תל אביב - יפו"], ["style", "both"], ["days", "1"], ["days", "2"], ["hs0", "10:00"], ["he0", "23:00"],
+  ["has_pa", "1"], ["active", "1"], ["min_price", "500"], ["rating", "4"],
+]);
+const gd = (await mem.list("professionals")).find((x: any) => x.phone === "0541212121")!;
+check(!!gd && gd.region === "gush_dan" && gd.extra_cities.length === 2 && gd.rating === 4, "אזור, ערים נוספות ודירוג נשמרו מהטופס");
+const rq2 = await ppost("/request", [
+  ["client_name", "יוסי"], ["client_phone", "0531313131"], ["need", "organist"], ["city_name", "רמת גן"], ["style", "hasidic"],
+  ["event_date", "2031-03-02"], ["start_time", "20:00"], ["end_time", "22:00"], ["has_pa", "1"], ["max_organist", "1000"], ["ts", old],
+], "7.7.7.7");
+const gdOffers = (await mem.list("offers")).filter((o: any) => o.pro_id === gd.id);
+check(rq2.status === 302 && gdOffers.length === 1 && gdOffers[0].auto, "בקשה ברמת גן קיבלה הצעה אוטומטית מבעל מקצוע מבני ברק (גוש דן)");
 
 globalThis.fetch = realFetch;
 console.log(fails ? `${fails} נכשלו` : "אתר הניהול תקין");
