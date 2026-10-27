@@ -3,6 +3,9 @@
 import { admin } from "../src/admin";
 import { MemDb } from "./memdb";
 import { normalize } from "../src/hebrew";
+import { pub } from "../src/public";
+import { scorePro } from "../src/auto";
+import { DEFAULTS } from "../src/settings";
 
 const mem = new MemDb();
 await mem.insert("cities", { name: "ירושלים", normalized: normalize("ירושלים") });
@@ -69,14 +72,15 @@ const matchPage = await (await get(`/requests/${req.id}`)).text();
 check(matchPage.includes("דוד כהן") && matchPage.includes("בעלי מקצוע מתאימים (1)"), "בעל המקצוע מוצע כהתאמה");
 check((await (await get("/matches")).text()).includes("משה לוי"), "הבקשה מופיעה ברשימת ההתאמות");
 
-console.log("הצעה ואישור");
-await post(`/requests/${req.id}/offer`, [["pro_id", pro.id], ["amount", "900"]]);
-const offer = (await mem.list("offers"))[0];
-check(offer?.amount === 900 && offer?.source === "web", "הצעה נוצרה מהאתר");
+console.log("הצעה אוטומטית ואישור");
+const offer = (await mem.list("offers"))[0]!;
+check(offer?.auto === true && offer?.amount === 800 && offer?.score > 0, "נוצרה הצעה אוטומטית עם ציון, במחיר המינימלי של בעל המקצוע");
 await post(`/offers/${offer.id}/accept`, []);
-const acc = (await mem.list("offers"))[0];
-check(acc.status === "accepted" && acc.fee_client === 90, "הצעה אושרה והעמלה חושבה");
+const acc = (await mem.list("offers"))[0]!;
+check(acc.status === "accepted" && acc.fee_client === 80, "הצעה אושרה והעמלה חושבה");
 check((await (await get(`/requests/${req.id}`)).text()).includes("0501111111"), "פרטי הקשר מוצגים אחרי אישור");
+await post(`/requests/${req.id}/offer`, [["pro_id", pro.id], ["amount", "900"]]);
+check((await mem.list("offers")).some((o: any) => o.source === "web" && o.amount === 900), "אפשר גם להצעה ידנית מהאתר");
 
 console.log("בקשה בעיר אחרת לא מותאמת");
 await post("/requests/new", [["client_name", "דני"], ["client_phone", "0533333333"], ["need", "organist"], ["city_name", "בני ברק"], ["style", "hasidic"], ["event_date", "2030-01-01"], ["start_time", "20:00"], ["end_time", "23:00"], ["has_pa", "1"], ["max_organist", "1000"]]);
@@ -87,6 +91,69 @@ check((await (await get(`/requests/${req2.id}`)).text()).includes("לא נמצא
 console.log("עריכת בעל מקצוע");
 r = await post(`/pros/${pro.id}`, [["phone", "0501111111"], ["role", "organist"], ["name", "דוד לוי"], ["city_name", "ירושלים"], ["style", "both"], ["min_price", "700"], ["active", "1"]]);
 check((await mem.list("professionals"))[0].name === "דוד לוי" && (await mem.list("professionals"))[0].min_price === 700, "העריכה נשמרה");
+
+
+console.log("דפים ציבוריים והתאמה אוטומטית");
+const pget = (p: string) => pub.request(p, {}, env);
+const ppost = (p: string, fields: [string, string][], ip = "1.1.1.1") =>
+  pub.request(p, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "cf-connecting-ip": ip }, body: new URLSearchParams(fields) }, env);
+const old = String(Date.now() - 10_000);
+
+check((await pget("/")).status === 200 && (await pget("/join")).status === 200 && (await pget("/request")).status === 200, "דפי הבית, ההרשמה והבקשה נטענים בלי סיסמה");
+check((await ppost("/join", [["phone", "0504444444"], ["name", "בוט"], ["ts", String(Date.now())]])).status === 400, "מילוי מהיר מדי נחסם");
+check((await ppost("/join", [["phone", "0504444444"], ["name", "בוט"], ["website", "spam"], ["ts", old]])).status === 400, "שדה המלכודת חוסם בוטים");
+
+// בעלי מקצוע ציבוריים: אחד עם דירוג גבוה ואחד זול ופחות מדורג
+const proFields = (phone: string, name: string, price: string): [string, string][] => [
+  ["phone", phone], ["role", "organist"], ["name", name], ["age", "30"], ["city_name", "ירושלים"], ["style", "hasidic"],
+  ["days", "1"], ["days", "2"], ["days", "3"], ["hs0", "18:00"], ["he0", "23:00"], ["has_pa", "1"], ["min_price", price], ["contact_phones", phone], ["ts", old],
+];
+let j = await ppost("/join", proFields("0505555555", "יעקב טוב", "950"), "2.2.2.2");
+check(j.status === 302 && String(j.headers.get("location")).startsWith("/p/"), "הרשמה ציבורית עברה והופנתה לדף אישי");
+await ppost("/join", proFields("0506666666", "אבי זול", "400"), "3.3.3.3");
+await ppost("/join", proFields("0507777777", "שלישי", "700"), "4.4.4.4");
+await ppost("/join", proFields("0508888888", "רביעי", "600"), "5.5.5.5");
+const all = await mem.list("professionals");
+const jacob = all.find((x: any) => x.phone === "0505555555")!;
+await mem.update("professionals", { id: jacob.id }, { rating: 5 });
+const avi = all.find((x: any) => x.phone === "0506666666")!;
+await mem.update("professionals", { id: avi.id }, { rating: 2 });
+const s = Object.fromEntries(Object.entries(DEFAULTS).map(([k, v]) => [k, v.value]));
+const reqForScore = { max_organist: 1000, allow_over: false, neighborhood: "" };
+check(scorePro({ rating: 5, min_price: 950, role: "organist" }, reqForScore, s) !== scorePro({ rating: 2, min_price: 400, role: "organist" }, reqForScore, s), "ציון ההתאמה מחשב איכות ומחיר");
+
+// בקשה ציבורית: נוצרות הצעות אוטומטית, לפחות לבעלי המקצוע המתאימים הטובים ביותר (עד 3)
+const before = (await mem.list("offers")).length;
+const rq = await ppost("/request", [
+  ["client_name", "אברהם"], ["client_phone", "0529999999"], ["need", "organist"], ["city_name", "ירושלים"], ["style", "hasidic"],
+  ["event_date", "2031-03-02"], ["start_time", "20:00"], ["end_time", "23:00"], ["has_pa", "1"], ["max_organist", "1200"], ["ts", old],
+], "6.6.6.6");
+const loc = String(rq.headers.get("location"));
+check(rq.status === 302 && loc.startsWith("/r/"), "בקשה ציבורית נשמרה והופנתה לדף אישי");
+const newOffers = (await mem.list("offers")).slice(before);
+check(newOffers.length === 3 && newOffers.every((o: any) => o.auto), "נוצרו בדיוק 3 הצעות אוטומטיות (המגבלה בהגדרות)");
+check(newOffers[0] && newOffers.map((o: any) => Number(o.score)).every((x: number) => x > 0), "לכל הצעה ציון");
+const page1 = await (await pget(loc)).text();
+check(page1.includes("ההצעות שלכם") && page1.includes("אני מאשר את ההצעה"), "דף הלקוח מציג הצעות עם כפתור אישור");
+check(page1.includes("יעקב טוב") && !page1.includes("אבי זול"), "נבחרו הטובים ביותר: הדירוג הגבוה מופיע, והזול עם הדירוג הנמוך לא");
+check(!page1.includes("0505555555"), "פרטי הקשר לא נחשפים לפני אישור");
+
+const firstOffer = newOffers[0];
+await ppost(`${loc}/accept`, [["offer_id", firstOffer.id]]);
+const accepted = (await mem.list("offers")).find((o: any) => o.id === firstOffer.id)!;
+check(accepted.status === "accepted" && accepted.fee_client > 0, "אישור ההצעה מהדף הציבורי חישב עמלה");
+check((await (await pget(loc)).text()).includes("הטלפון של"), "אחרי אישור מוצגים פרטי הקשר");
+
+const tok = (await mem.list("professionals")).find((x: any) => x.phone === "0505555555")!.public_token;
+const pp = await (await pget(`/p/${tok}`)).text();
+check(pp.includes("שלום יעקב טוב") && pp.includes("הצעות שנשלחו"), "הדף האישי של בעל המקצוע נטען");
+await ppost(`/p/${tok}/pause`, []);
+check((await mem.list("professionals")).find((x: any) => x.phone === "0505555555")!.active === false, "בעל מקצוע יכול להשהות את עצמו");
+
+check((await pget("/r/not-a-token")).status === 404 && (await pget("/p/not-a-token")).status === 404, "קישור שגוי מחזיר 404");
+let limited = 0;
+for (let i = 0; i < 10; i++) { const x = await ppost("/join", [["phone", "12"], ["ts", old]], "9.9.9.9"); if (x.status === 400 && (await x.text()).includes("יותר מדי")) limited++; }
+check(limited > 0, "הגבלת קצב לכתובת עובדת");
 
 globalThis.fetch = realFetch;
 console.log(fails ? `${fails} נכשלו` : "אתר הניהול תקין");

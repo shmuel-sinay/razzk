@@ -4,15 +4,18 @@ import { SupabaseDb } from "./db";
 import { loadSettings, calcFee } from "./settings";
 import { normalize, fmtDate, fmtTime, DAY_NAMES } from "./hebrew";
 import { proMatches, budgetFor } from "./match";
+import { autoOffer, fillOpenRequests, scorePro } from "./auto";
 import { esc, page, table } from "./ui";
 
 /** טפסי הוספה ועריכה, והתאמות (שידוכים) — הכול דרך האתר */
 export const web = new Hono<{ Bindings: Env }>();
 
-const db = (c: { env: Env }) => new SupabaseDb(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY);
+export const db = (c: { env: Env }) => new SupabaseDb(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY);
 
 const ROLE: Record<string, string> = { organist: "אורגניסט", organist_singer: "אורגניסט וזמר", singer: "זמר" };
 const STYLE: Record<string, string> = { hasidic: "חסידי", mizrahi: "מזרחי", both: "שניהם" };
+
+export const newToken = () => crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 8);
 
 // ───────────── עזרי טפסים ─────────────
 
@@ -22,11 +25,11 @@ const sel = (name: string, label: string, opts: [string, string][], cur: any) =>
   `<p><label><b>${label}</b><br><select name="${name}">${opts.map(([v, l]) => `<option value="${v}"${String(cur) === v ? " selected" : ""}>${l}</option>`).join("")}</select></label></p>`;
 const chk = (name: string, label: string, on: any, val = "1") =>
   `<label style="margin-left:14px"><input type="checkbox" name="${name}" value="${val}"${on ? " checked" : ""}> ${label}</label>`;
-const hhmm = (t: string) => (t || "").replace(":", "").padStart(4, "0").slice(0, 4);
+export const hhmm = (t: string) => (t || "").replace(":", "").padStart(4, "0").slice(0, 4);
 const hh_mm = (t: string) => (t && t.length === 4 ? `${t.slice(0, 2)}:${t.slice(2)}` : "");
 const arr = (v: any): string[] => (Array.isArray(v) ? v.map(String) : v === undefined ? [] : [String(v)]);
 
-async function cityList(d: SupabaseDb): Promise<Row[]> {
+export async function cityList(d: SupabaseDb): Promise<Row[]> {
   return d.list("cities", { limit: 10000 });
 }
 const cityDatalist = (cities: Row[]) =>
@@ -43,11 +46,11 @@ const warnCity = (id: any, name: string) =>
 
 // ───────────── בעל מקצוע ─────────────
 
-function proForm(r: Row, cities: Row[], action: string, title: string): string {
+export function proFields(r: Row, cities: Row[], admin: boolean): string {
   const hours: Row[] = r.hours?.length ? r.hours : [];
   const hr = [0, 1, 2].map((i) => `<p>חלון ${i + 1}: מ- <input type="time" name="hs${i}" value="${esc(hh_mm(hours[i]?.start))}" style="width:auto"> עד <input type="time" name="he${i}" value="${esc(hh_mm(hours[i]?.end))}" style="width:auto"></p>`).join("");
-  return page(title, `<form method="post" action="${action}" class="card">
-${inp("phone", "טלפון הרישום (מזהה)", r.phone, "text", r.id ? "readonly" : "required")}
+  return `
+${inp("phone", "טלפון (מזהה)", r.phone, "text", r.id ? "readonly" : "required")}
 ${sel("role", "תפקיד", [["organist", "אורגניסט"], ["organist_singer", "אורגניסט וזמר"], ["singer", "זמר"]], r.role || "organist")}
 ${inp("name", "שם ומשפחה", r.name)}${inp("age", "גיל", r.age, "number")}
 <p><label><b>עיר או ישוב</b><br><input type="text" name="city_name" list="cities" value="${esc(r.city_name)}"></label></p>${cityDatalist(cities)}
@@ -56,15 +59,18 @@ ${sel("style", "סגנון נגינה", [["hasidic", "חסידי"], ["mizrahi", 
 <p><b>ימי זמינות</b><br>${[1, 2, 3, 4, 5, 6, 7].map((n) => chk("days", DAY_NAMES[n], (r.days || []).includes(n), String(n))).join("")}</p>
 <p><b>שעות זמינות</b> (אפשר עד שלושה חלונות; סיום אחרי חצות נתמך, למשל 21:00 עד 01:00)</p>${hr}
 <p><label><b>פרטים על ההתמקצעות</b><br><textarea name="bio">${esc(r.bio)}</textarea></label></p>
-<p>${chk("has_pa", "יש הגברה", r.has_pa)} ${chk("tzintuk_ok", "מאשר צינתוקים", r.tzintuk_ok)} ${chk("active", "פעיל", r.active ?? true)}</p>
+<p>${chk("has_pa", "יש הגברה", r.has_pa)} ${chk("tzintuk_ok", "מאשר צינתוקים", r.tzintuk_ok)}${admin ? " " + chk("active", "פעיל", r.active ?? true) : ""}</p>
 ${inp("min_price", "סכום מינימלי לאירוע (₪)", r.min_price, "number")}
 ${inp("contact_phones", "טלפונים לקבלת הזמנות (מופרדים בפסיק)", (r.contact_phones || []).join(","))}
 ${sel("email_recording", "מוכן לשלוח הקלטת נגינה במייל", [["yes", "כן"], ["no", "לא"], ["maybe", "אם יהיה זמין"]], r.email_recording || "maybe")}
-<p><label><b>הערות פנימיות</b><br><textarea name="notes">${esc(r.notes)}</textarea></label></p>
-<button>שמירה</button></form>`);
+${admin ? `${inp("rating", "דירוג איכות (1 עד 5)", r.rating ?? 3, "number", 'min="1" max="5" step="0.5"')}<p><label><b>הערות פנימיות</b><br><textarea name="notes">${esc(r.notes)}</textarea></label></p>` : ""}`;
 }
 
-async function proFromForm(d: SupabaseDb, f: Row): Promise<Row> {
+function proForm(r: Row, cities: Row[], action: string, title: string): string {
+  return page(title, `<form method="post" action="${action}" class="card">${proFields(r, cities, true)}<button>שמירה</button></form>`);
+}
+
+export async function proFromForm(d: SupabaseDb, f: Row, admin = true): Promise<Row> {
   const city = resolveCity(await cityList(d), String(f.city_name || ""));
   const hours = [0, 1, 2]
     .filter((i) => f[`hs${i}`] && f[`he${i}`])
@@ -73,10 +79,11 @@ async function proFromForm(d: SupabaseDb, f: Row): Promise<Row> {
     role: String(f.role), name: String(f.name || ""), age: Number(f.age) || null,
     city_id: city.id, city_name: city.name, neighborhood: String(f.neighborhood || ""),
     style: String(f.style), days: arr(f.days).map(Number).sort(), hours,
-    bio: String(f.bio || ""), has_pa: f.has_pa === "1", tzintuk_ok: f.tzintuk_ok === "1", active: f.active === "1",
+    bio: String(f.bio || "").slice(0, 600), has_pa: f.has_pa === "1", tzintuk_ok: f.tzintuk_ok === "1",
+    ...(admin ? { active: f.active === "1", rating: Math.max(1, Math.min(5, Number(f.rating) || 3)), notes: String(f.notes || "") } : {}),
     min_price: Number(f.min_price) || 0,
     contact_phones: String(f.contact_phones || "").split(",").map((x) => x.trim()).filter(Boolean),
-    email_recording: String(f.email_recording || "maybe"), notes: String(f.notes || ""),
+    email_recording: String(f.email_recording || "maybe"),
   };
 }
 
@@ -87,7 +94,9 @@ web.post("/pros/new", async (c) => {
   const d = db(c);
   const phone = String(f.phone || "").replace(/\D/g, "");
   if (!phone) return c.html(page("שגיאה", `<div class="card">חובה למלא טלפון.</div>`), 400);
-  const row = await d.upsert("professionals", { phone, ...(await proFromForm(d, f)) }, "phone");
+  const old = await d.get("professionals", { phone });
+  const row = await d.upsert("professionals", { phone, public_token: old?.public_token || newToken(), ...(await proFromForm(d, f)) }, "phone");
+  await fillOpenRequests(d, c.env, await loadSettings(d));
   return c.redirect(`/admin/pros/${row.id}`);
 });
 
@@ -104,14 +113,14 @@ web.post("/pros/:id", async (c) => {
   const f = await c.req.parseBody({ all: true });
   const d = db(c);
   await d.update("professionals", { id: c.req.param("id") }, await proFromForm(d, f));
+  await fillOpenRequests(d, c.env, await loadSettings(d));
   return c.redirect(`/admin/pros/${c.req.param("id")}`);
 });
 
 // ───────────── בקשה (לקוח + אירוע) ─────────────
 
-function reqForm(r: Row, cities: Row[], action: string, title: string): string {
-  return page(title, `<form method="post" action="${action}" class="card">
-<h3>הלקוח</h3>
+export function reqFields(r: Row, cities: Row[]): string {
+  return `<h3>הלקוח</h3>
 ${inp("client_name", "שם הלקוח", r.client_name)}${inp("client_phone", "טלפון הלקוח", r.client_phone, "text", "required")}
 <h3>האירוע</h3>
 ${sel("need", "מה מבקשים", [["organist", "אורגניסט בלבד"], ["organist_singer", "אורגניסט וזמר"]], r.need || "organist")}
@@ -123,11 +132,14 @@ ${inp("event_date", "תאריך האירוע", r.event_date, "date", "required")
 <p>${chk("has_pa", "יש הגברה באולם", r.has_pa)} ${chk("allow_over", "מאשר הצעה החורגת מהתקציב", r.allow_over)} ${chk("tzintuk_ok", "מאשר צינתוקים", r.tzintuk_ok)}</p>
 ${inp("max_organist", "תקציב מקסימלי לאורגניסט (₪)", r.max_organist, "number")}${inp("max_singer", "תקציב מקסימלי לזמר (₪, אם נדרש)", r.max_singer, "number")}
 ${inp("contact_phones", "טלפונים לקבלת הצעות (מופרדים בפסיק)", (r.contact_phones || []).join(","))}
-<p><label><b>הערות</b><br><textarea name="notes">${esc(r.notes)}</textarea></label></p>
-<button>שמירה</button></form>`);
+<p><label><b>הערות</b><br><textarea name="notes">${esc(r.notes)}</textarea></label></p>`;
 }
 
-async function reqFromForm(d: SupabaseDb, f: Row): Promise<Row> {
+function reqForm(r: Row, cities: Row[], action: string, title: string): string {
+  return page(title, `<form method="post" action="${action}" class="card">${reqFields(r, cities)}<button>שמירה</button></form>`);
+}
+
+export async function reqFromForm(d: SupabaseDb, f: Row): Promise<Row> {
   const city = resolveCity(await cityList(d), String(f.city_name || ""));
   return {
     client_name: String(f.client_name || ""), client_phone: String(f.client_phone || "").replace(/\D/g, ""),
@@ -149,7 +161,8 @@ web.post("/requests/new", async (c) => {
   const d = db(c);
   const row = await reqFromForm(d, f);
   if (row.client_phone) await d.upsert("clients", { phone: row.client_phone, name: row.client_name }, "phone");
-  const made = await d.insert("requests", { ...row, status: "open" });
+  const made = await d.insert("requests", { ...row, status: "open", public_token: newToken() });
+  await autoOffer(d, c.env, await loadSettings(d), made);
   return c.redirect(`/admin/requests/${made.id}`);
 });
 
@@ -176,19 +189,21 @@ web.get("/requests/:id", async (c) => {
   const over = Number(settings.over_budget_percent || 15);
   const [pros, offers] = await Promise.all([d.list("professionals", { match: { active: true }, limit: 10000 }), d.list("offers", { match: { request_id: r.id }, order: "created_at.desc" })]);
   const offered = new Set(offers.map((o) => o.pro_id));
-  const matches = pros.filter((p) => proMatches(p, r, over));
+  const matches = pros.filter((p) => proMatches(p, r, over)).map((p): Row => ({ ...p, _score: scorePro(p, r, settings) })).sort((a: Row, b: Row) => b._score - a._score);
   const byId = new Map(pros.map((p) => [p.id, p]));
 
   const details = `<div class="card"><p><b>${esc(r.client_name || r.client_phone)}</b> · ${esc(r.client_phone)} · ${r.need === "organist" ? "אורגניסט" : "אורגניסט וזמר"}</p>
 <p>${esc(r.city_name)}${r.neighborhood ? ", " + esc(r.neighborhood) : ""} · ${esc(r.hall_name || "")} · ${fmtDate(r.event_date)} · ${fmtTime(r.start_time)}–${fmtTime(r.end_time)} · ${STYLE[r.style] || ""}</p>
 <p>תקציב: אורגניסט ${esc(r.max_organist)}₪${r.max_singer ? ` · זמר ${esc(r.max_singer)}₪` : ""} · הגברה באולם: ${r.has_pa ? "יש" : "אין"} · סטטוס: ${esc(r.status)}</p>
 ${warnCity(r.city_id, r.city_name)}
-<a href="/admin/requests/${r.id}/edit"><button>עריכת הבקשה</button></a></div>`;
+<a href="/admin/requests/${r.id}/edit"><button>עריכת הבקשה</button></a>
+<form method="post" action="/admin/requests/${r.id}/auto" style="display:inline"><button>הפעל התאמה אוטומטית מחדש</button></form>
+${r.public_token ? `<p><small>דף אישי ללקוח: <a href="/r/${r.public_token}">/r/${r.public_token}</a></small></p>` : ""}</div>`;
 
   const matchRows = matches.map((p) => {
     const budget = budgetFor(p.role, r, over);
     const done = offered.has(p.id);
-    return `<tr><td>${esc(p.name || p.phone)}<br><small>${esc(p.phone)}</small></td><td>${ROLE[p.role]}</td><td>${STYLE[p.style] || ""}</td>
+    return `<tr><td>${esc(p.name || p.phone)}<br><small>${esc(p.phone)}</small></td><td>${ROLE[p.role]}<br><small>⭐ ${esc(p.rating ?? 3)} · ציון ${p._score}</small></td><td>${STYLE[p.style] || ""}</td>
 <td>מינימום ${esc(p.min_price)}₪<br><small>תקציב ${budget}₪</small></td><td><small>${esc(p.bio || "")}</small></td>
 <td>${done ? "נשלחה הצעה" : `<form method="post" action="/admin/requests/${r.id}/offer"><input type="hidden" name="pro_id" value="${p.id}"><input type="number" name="amount" value="${esc(p.min_price || budget)}" style="width:90px"> <button>הצע</button></form>`}</td></tr>`;
   }).join("");
@@ -199,12 +214,19 @@ ${warnCity(r.city_id, r.city_name)}
   const offerRows = offers.map((o) => {
     const p = byId.get(o.pro_id);
     const fee = calcFee(o.amount, settings);
-    return `<tr><td>${esc(p?.name || p?.phone || "")}</td><td>${esc(o.amount)}₪</td><td>${o.status === "accepted" ? "✅ אושרה" : "נשלחה"}</td>
+    return `<tr><td>${esc(p?.name || p?.phone || "")}</td><td>${esc(o.amount)}₪</td><td>${o.status === "accepted" ? "✅ אושרה" : "נשלחה"}${o.auto ? "<br><small>אוטומטית · ציון " + esc(o.score) + "</small>" : ""}</td>
 <td>עמלה ${fee.total}₪ (לקוח ${fee.client}₪ · בעל מקצוע ${fee.pro}₪)</td>
 <td>${o.status === "accepted" ? `פרטי קשר: ${esc((p?.contact_phones || [p?.phone]).join(", "))}` : `<form method="post" action="/admin/offers/${o.id}/accept"><button>אישור הצעה</button></form>`}</td></tr>`;
   }).join("");
 
   return c.html(page("בקשה והתאמות", details + `<h3>בעלי מקצוע מתאימים (${matches.length})</h3>${matchTable}<h3>הצעות שנשלחו (${offers.length})</h3>${offers.length ? `<table><tr><th>בעל מקצוע</th><th>סכום</th><th>סטטוס</th><th>עמלה</th><th></th></tr>${offerRows}</table>` : "<p>עוד לא נשלחו הצעות.</p>"}`));
+});
+
+web.post("/requests/:id/auto", async (c) => {
+  const d = db(c);
+  const r = await d.get("requests", { id: c.req.param("id") });
+  if (r) await autoOffer(d, c.env, await loadSettings(d), r);
+  return c.redirect(`/admin/requests/${c.req.param("id")}`);
 });
 
 web.post("/requests/:id/offer", async (c) => {

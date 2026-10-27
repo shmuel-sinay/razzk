@@ -67,23 +67,19 @@ check(db.t.requests?.length === 1, "הבקשה נשמרה");
 check(/נמצאו 1 בעלי מקצוע/.test(cl.last.replace(/&go_to_folder.*/, "")), "נמצא בעל מקצוע מתאים אחד");
 check(toRoot(cl), "חזרה לתפריט הראשי בקו");
 
-console.log("בעל המקצוע רואה את הבקשה ומגיש הצעה");
-const pro2 = new Call("0501111111", "/3");
-await pro2.start({ flow: "personal" });
-await pro2.answers("1");
-check(/בקשה 1 מתוך 1/.test(pro2.last), "הבקשה מופיעה בבקשות המתאימות");
-await pro2.answers("1", "900", "");
-const offers = db.t.offers || [];
-check(offers.length === 1 && offers[0].amount === 900, "ההצעה נשמרה");
+console.log("הצעה אוטומטית נוצרת בלי התערבות");
+const auto = db.t.offers || [];
+check(auto.length === 1 && auto[0].auto === true && auto[0].amount === 800, "נוצרה הצעה אוטומטית במחיר המינימלי של בעל המקצוע");
+check(Number(auto[0]?.score) > 0, `לההצעה ציון התאמה (${auto[0]?.score})`);
 
 console.log("הלקוח שומע את ההצעה ומאשר");
 const cl2 = new Call("0522222222", "/3");
 await cl2.start({ flow: "personal" });
 await cl2.answers("1");
-check(/הצעה 1 מתוך 1/.test(cl2.last) && /900 שקלים/.test(cl2.last), "ההצעה נשמעת ללקוח");
+check(/הצעה 1 מתוך 1/.test(cl2.last) && /800 שקלים/.test(cl2.last), "ההצעה נשמעת ללקוח");
 await cl2.answers("2", "1");
 check((db.t.offers || [])[0].status === "accepted", "ההצעה אושרה");
-check((db.t.offers || [])[0].fee_client === 90, "עמלה חושבה (10% על הלקוח = 90)");
+check((db.t.offers || [])[0].fee_client === 80, "עמלה חושבה (10% על הלקוח = 80)");
 
 console.log("בקשה מעיר אחרת לא מתאימה");
 const cl3 = new Call("0533333333", "/1/1/1");

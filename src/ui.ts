@@ -40,3 +40,22 @@ export function table(cols: [string, string][], rows: Row[], extra?: (r: Row) =>
 export const delBtn = (table: string, id: string) =>
   `<form method="post" action="/admin/delete" onsubmit="return confirm('למחוק?')"><input type="hidden" name="table" value="${table}"><input type="hidden" name="id" value="${id}"><button class="d">מחיקה</button></form>`;
 
+
+/** עטיפת עמוד לדפים הציבוריים: בלי תפריט ניהול, ידידותי לנייד */
+export function publicPage(title: string, body: string): string {
+  return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${esc(title)}</title>
+<style>
+body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f5f6f8;color:#1c1e21;line-height:1.5}
+header{background:#1f3a5f;color:#fff;padding:14px 18px;font-size:19px}
+main{max-width:640px;margin:18px auto;padding:0 14px 40px}
+h1{font-size:22px} h3{margin:18px 0 6px}
+.card{background:#fff;padding:16px;border-radius:10px;margin-bottom:14px;box-shadow:0 1px 3px #0001}
+input[type=text],input[type=number],input[type=date],input[type=time],textarea,select{width:100%;box-sizing:border-box;padding:10px;border:1px solid #c5cad3;border-radius:8px;font:inherit}
+textarea{min-height:80px}
+button,.btn{background:#1f3a5f;color:#fff;border:0;padding:11px 20px;border-radius:8px;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
+.btn.big{display:block;text-align:center;padding:18px;font-size:19px;margin-bottom:12px}
+.hp{position:absolute;left:-9999px;height:0;overflow:hidden}
+.ok{background:#e6f4ea} .warn{background:#fff4e0} small{color:#666}
+</style></head><body><header>מערכת תיווך לאורגניסטים וזמרים</header><main><h1>${esc(title)}</h1>${body}</main></body></html>`;
+}

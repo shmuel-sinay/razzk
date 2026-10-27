@@ -4,6 +4,7 @@ import { SupabaseDb } from "./db";
 import { loadSettings } from "./settings";
 import { handleIvr } from "./ivr/handler";
 import { admin } from "./admin";
+import { pub } from "./public";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -28,7 +29,7 @@ app.all("/ivr", async (c) => {
 });
 
 app.route("/admin", admin);
-app.get("/", (c) => c.redirect("/admin"));
+app.route("/", pub);
 
 export default {
   fetch: app.fetch,

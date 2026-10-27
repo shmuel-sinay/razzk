@@ -3,6 +3,7 @@ import { calcFee } from "../settings";
 import { budgetFor, proMatches } from "../match";
 import { fmtDate, fmtTime, DAY_NAMES } from "../hebrew";
 import { sendTzintuk } from "../yemot";
+import { autoOffer } from "../auto";
 import { type Ctx, type Sess, t, f, say, readDigits, readRecord, isEmpty } from "./core";
 import { type Field, type FormDef, runForm } from "./forms";
 
@@ -200,17 +201,9 @@ function startForm(ctx: Ctx, s: Sess, id: string, params: Row = {}, pre: Row = {
 
 // ───────────────────────── חישוב התאמות והתראות ─────────────────────────
 
-async function matchingPros(ctx: Ctx, req: Row): Promise<Row[]> {
-  const over = Number(ctx.settings.over_budget_percent || 15);
-  const all = await ctx.db.list("professionals", { match: { active: true }, limit: 5000 });
-  return all.filter((p) => proMatches(p, req, over));
-}
-
 async function notifyMatches(ctx: Ctx, req: Row): Promise<number> {
-  const pros = await matchingPros(ctx, req);
-  const phones = pros.filter((p) => p.tzintuk_ok).map((p) => p.phone);
-  await sendTzintuk(ctx.env, ctx.settings, phones);
-  return pros.length;
+  const r = await autoOffer(ctx.db, ctx.env, ctx.settings, req);
+  return r.matched;
 }
 
 // ───────────────────────── אזור אישי ─────────────────────────
